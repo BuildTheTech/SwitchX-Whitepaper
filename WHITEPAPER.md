@@ -1,4 +1,4 @@
-# SWITCH Protocol Whitepaper
+# SwitchX Protocol Whitepaper
 
 **Version 1.0 — February 2026**
 
@@ -18,7 +18,7 @@
 10. [MEV Recapture System](#10-mev-recapture-system)
 11. [Automated Liquidity Management](#11-automated-liquidity-management)
 12. [Security Model](#12-security-model)
-13. [What Sets SWITCH Apart](#13-what-sets-switch-apart)
+13. [What Sets SwitchX Apart](#13-what-sets-switchx-apart)
 14. [Emission Math Appendix](#14-emission-math-appendix)
 15. [References](#15-references)
 
@@ -26,7 +26,7 @@
 
 ## 1. Abstract
 
-SWITCH is a concentrated liquidity decentralized exchange protocol built on PulseChain that combines a custom ve(3,3) governance model with novel mechanisms for supply scarcity, MEV recapture, and sustainable rewards. Unlike existing ve(3,3) implementations that suffer from perpetual inflation and mercenary capital, SWITCH introduces a hard-capped token supply with a 2.5-year emission schedule, permanent burn locks with a 2x voting power multiplier, automatic farming reward locking, protocol fee buybacks, drip-based reward smoothing, and an integrated MEV recapture system that redistributes extracted value back to governance participants. Together, these mechanisms create a self-reinforcing flywheel where long-term commitment is rewarded, supply progressively contracts, and protocol value accrues to those most aligned with the system's success.
+SwitchX is a concentrated liquidity decentralized exchange protocol built on PulseChain that combines a custom ve(3,3) governance model with novel mechanisms for supply scarcity, MEV recapture, and sustainable rewards. Unlike existing ve(3,3) implementations that suffer from perpetual inflation and mercenary capital, SwitchX introduces a hard-capped token supply with a 2.5-year emission schedule, permanent burn locks with a 2x voting power multiplier, automatic farming reward locking, protocol fee buybacks, drip-based reward smoothing, and an integrated MEV recapture system that redistributes extracted value back to governance participants. Together, these mechanisms create a self-reinforcing flywheel where long-term commitment is rewarded, supply progressively contracts, and protocol value accrues to those most aligned with the system's success.
 
 ---
 
@@ -50,9 +50,9 @@ However, these protocols share several structural weaknesses:
 
 - **Manual liquidity management.** Concentrated liquidity requires active position management. Without automation, liquidity fragments across stale ranges, reducing capital efficiency and increasing impermanent loss.
 
-### 2.2 The SWITCH Thesis
+### 2.2 The SwitcX Protocol Thesis
 
-SWITCH addresses these problems through a coordinated set of mechanisms:
+SwitchX addresses these problems through a coordinated set of mechanisms:
 
 1. **Fixed supply with terminal emissions.** A hard cap of 1 billion SWITCH tokens with all emissions completing within 2.5 years. After that, no new tokens are ever minted.
 
@@ -74,7 +74,7 @@ SWITCH addresses these problems through a coordinated set of mechanisms:
 
 ## 3. Protocol Architecture Overview
 
-SWITCH is built on a modular architecture where each layer composes with the next through well-defined interfaces. This design allows independent upgrades to individual components without disrupting the broader system.
+SwitchX is built on a modular architecture where each layer composes with the next through well-defined interfaces. This design allows independent upgrades to individual components without disrupting the broader system.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -131,7 +131,7 @@ SWITCH is built on a modular architecture where each layer composes with the nex
 
 ### 4.1 V4Pool Mechanics
 
-At the core of SWITCH is the V4Pool contract — a concentrated liquidity AMM where liquidity providers allocate capital to specific price ranges (ticks). This is a ground-up recreation of Uniswap V4, itself derived from the Uniswap V3 concentrated liquidity design with significant modifications.
+At the core of SwitchX is the V4Pool contract — a concentrated liquidity AMM where liquidity providers allocate capital to specific price ranges (ticks). This is a ground-up recreation of Uniswap V4, itself derived from the Uniswap V3 concentrated liquidity design with significant modifications.
 
 Each pool tracks:
 - A global price (`sqrtPriceX96`) and current tick
@@ -196,16 +196,18 @@ fee = baseFee + f(volatilityAverage, alpha1, alpha2, beta1, beta2, gamma1, gamma
 
 When `alpha1` and `alpha2` are both zero, the plugin returns a flat `baseFee` — allowing pools to opt out of dynamic pricing.
 
-### 5.2 Backrun Fee Surcharge
+### 5.2 MEV Protection (Bot-Proof Backrun Fee)
 
-The `BackrunFeePlugin` adds a same-block MEV surcharge to deter sandwich attacks and backrunning:
+A **sandwich attack** is the most common form of MEV extraction on DEXs: an attacker front-runs a user's swap to move the price against them, then back-runs (reverses direction) immediately after to capture the difference as profit. The victim receives worse execution, effectively paying a hidden tax to the attacker. On many DEXs this occurs silently and at scale.
+
+The `BackrunFeePlugin` eliminates this attack vector by making the back-run leg — the profitable reversal — prohibitively expensive:
 
 - **Trigger condition**: A swap occurs in the same block as a previous swap, and the new swap's direction would profit from the prior price movement (i.e., it reverses the direction of the previous swap's tick change).
 - **Surcharge formula**: `updatedFee = baseFee + (baseFee × backrunFeeFactor / 1000)`
 - **Default factor**: `5000` (i.e., +500%, resulting in 6x the base fee)
 - **Maximum factor**: `10000` (10x surcharge, 11x total)
 
-This makes sandwich attacks significantly more expensive while leaving normal trading unaffected. Swaps in different blocks or in the same direction as the previous price movement pay standard fees.
+**Why regular users are unaffected**: The surcharge only triggers on same-block direction reversals — a pattern that characterizes sandwich back-runs, not ordinary trading. Users swapping in different blocks, or in the same direction as the prior price movement, always pay the standard fee. In practice, this means normal traders never see the surcharge while sandwich bots face fees that exceed their expected profit, making the attack unprofitable.
 
 ### 5.3 Fee Discount Plugin
 
@@ -318,7 +320,7 @@ Users lock SWITCH tokens for a chosen duration (up to 2 years / `MAXTIME`) to re
 
 ### 7.2 Burn Locks (Permanent Commitment)
 
-Burn locks are SWITCH's most distinctive governance feature. Instead of locking tokens for a finite period, holders can **irreversibly burn** their SWITCH tokens in exchange for permanent, non-decaying voting power.
+Burn locks are SwitchX's most distinctive governance feature. Instead of locking tokens for a finite period, holders can **irreversibly burn** their SWITCH tokens in exchange for permanent, non-decaying voting power. Unlike protocols such as Blackhole, where "burn" refers to permanently locked (but not destroyed) tokens, SwitchX burn locks are true burns: the underlying SWITCH is permanently destroyed, reducing total supply. This distinction is unique among ve(3,3) implementations.
 
 **Mechanism:**
 1. User calls `burn_lock(tokenId)` on an existing veNFT, or `create_burn(amount, recipient)` for a new one
@@ -348,7 +350,7 @@ Burn locks create genuine, irreversible alignment. In standard ve(3,3), a "max-l
 
 ### 7.3 Early Exit
 
-SWITCH introduces an early exit mechanism that allows veNFT holders to unlock before expiry — in exchange for a penalty that scales with time remaining.
+SwitchX introduces an early exit mechanism that allows veNFT holders to unlock before expiry — in exchange for a penalty that scales with time remaining.
 
 **Penalty Curve:**
 
@@ -421,7 +423,7 @@ The permanent burn lock ensures the protocol treasury retains meaningful governa
 
 ### 8.1 Weekly Epoch System
 
-SWITCH operates on a weekly epoch cycle:
+SwitchX operates on a weekly epoch cycle:
 
 1. **veNFT holders vote** on which pools should receive emissions
 2. **Minter distributes** tokens to Voter based on the emission schedule
@@ -469,7 +471,7 @@ If the buyback swap reverts for any reason (insufficient liquidity, pool not ini
 
 Standard ve(3,3) implementations distribute 100% of fees immediately in the period they accrue. This creates volatile, unpredictable reward streams — a large trade generates a spike, followed by periods of minimal returns.
 
-SWITCH replaces this with the `DripVotingReward` contract, which pools fees and releases them gradually.
+SwitchX replaces this with the `DripVotingReward` contract, which pools fees and releases them gradually.
 
 **Mechanism:**
 1. Fees arrive via `notifyRewardAmount()` from the Voter during `distribute()`
@@ -517,7 +519,7 @@ Positions are automatically enrolled in farming when minted through the FarmingC
 
 ### 9.2 Auto-Lock Mechanism
 
-The auto-lock system is SWITCH's mechanism for compounding governance alignment through farming rewards. When a user claims SWITCH farming rewards, a configurable percentage is automatically locked into a veNFT at maximum duration (2 years).
+The auto-lock system is SwitchX's mechanism for compounding governance alignment through farming rewards. When a user claims SWITCH farming rewards, a configurable percentage is automatically locked into a veNFT at maximum duration (2 years).
 
 **How it works:**
 
@@ -528,6 +530,7 @@ The auto-lock system is SWITCH's mechanism for compounding governance alignment 
 2. The split is determined by the auto-lock percentage, which can be configured:
    - **Per-pool**: `autoLockConfigByPool[pool].percentage` (if enabled)
    - **Default**: `defaultAutoLockPercentage` (fallback for pools without per-pool config)
+   - **Cap**: Auto-lock percentage is limited to a maximum of 75% (enforced on-chain)
    - Target at launch: ~50% of SWITCH rewards auto-locked
 
 3. When the user claims locked rewards:
@@ -748,11 +751,11 @@ Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH toke
 
 ---
 
-## 13. What Sets SWITCH Apart
+## 13. What Sets SwitchX Apart
 
 ### 13.1 Comparison Table
 
-| Feature | Standard ve(3,3) | SWITCH |
+| Feature | Standard ve(3,3) | SwitchX |
 |---------|-----------------|--------|
 | **Token Supply** | Perpetual tail emissions | Hard cap (1B), 2.5-year schedule, then zero |
 | **Lock Types** | Time-locked only | + Burn locks (permanent, 2x voting power) |
@@ -761,11 +764,12 @@ Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH toke
 | **Fee Processing** | Direct passthrough to voters | 50% SWITCH buyback + 50% passthrough |
 | **Farm Rewards** | 100% liquid | ~50% auto-locked for 2 years |
 | **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed |
+| **MEV Protection** | None; users vulnerable to sandwich attacks | Backrun fee surcharge makes sandwiches unprofitable |
 | **Swap Fees** | Static fee tiers | Volatility-adaptive + same-block MEV surcharge |
 | **Liquidity Management** | Manual positions | Automated ALM vaults with TWAP rebalancing |
 | **Exit Penalty Distribution** | N/A | 50% burned, 50% to voters |
 
-### 13.2 The SWITCH Flywheel
+### 13.2 The SwitchX Flywheel
 
 These mechanisms combine into a self-reinforcing economic flywheel:
 
@@ -998,4 +1002,4 @@ The protocol has been audited by multiple firms. Reports are available in the `a
 
 ---
 
-*This document describes the SWITCH protocol as implemented in the smart contracts at the time of writing. Parameters are configurable through governance and may be adjusted post-launch. All values cited are from the deployed contract code and deployment scripts.*
+*This document describes the SwitchX protocol as implemented in the smart contracts at the time of writing. Parameters are configurable through governance and may be adjusted post-launch. All values cited are from the deployed contract code and deployment scripts.*
