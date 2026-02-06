@@ -50,7 +50,7 @@ However, these protocols share several structural weaknesses:
 
 - **Manual liquidity management.** Concentrated liquidity requires active position management. Without automation, liquidity fragments across stale ranges, reducing capital efficiency and increasing impermanent loss.
 
-### 2.2 The SwitcX Protocol Thesis
+### 2.2 The SwitchX Protocol Thesis
 
 SwitchX addresses these problems through a coordinated set of mechanisms:
 
