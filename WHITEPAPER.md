@@ -226,6 +226,23 @@ The `SecurityPlugin` controls pool access through configurable security states:
 
 This allows pool operators to pause trading during emergencies, enable graceful wind-downs (burn-only mode), or disable flash loans while keeping swaps active.
 
+### 5.5 Limit Order Plugin
+
+The `LimitOrderPlugin` enables on-chain limit order execution through the `afterSwap` hook — no off-chain keepers or relayers required.
+
+**Mechanism:**
+
+1. **Placement**: Users deposit single-sided liquidity at a specific tick via `LimitOrderManager.place()`. Orders at the same tick and direction are grouped into a shared **epoch** for gas-efficient batch settlement.
+2. **Execution**: When a swap crosses the order's tick, the `afterSwap` hook detects the crossing, removes the epoch's liquidity, and marks it as filled. Execution is atomic with the triggering swap — no MEV opportunity exists between detection and fill.
+3. **Withdrawal**: After an epoch is filled, users withdraw their pro-rata share of the converted tokens via `withdraw()`.
+
+**Properties:**
+- **No external dependencies**: Orders execute as part of normal swap flow, eliminating reliance on off-chain bots
+- **Gas efficient**: Epoch batching amortizes gas costs across all orders at the same price point
+- **Composable**: Works alongside dynamic fees, farming, and ALM without conflicts
+
+Limit orders are disabled for pools with narrow tick spacing (e.g., SWITCH token pools) where large price movements could cause excessive tick iteration in the `afterSwap` hook.
+
 ---
 
 ## 6. SWITCH Token Economics
@@ -527,11 +544,12 @@ The auto-lock system is SwitchX's mechanism for compounding governance alignment
    - **Free rewards**: Claimable and transferable immediately
    - **Locked rewards**: Earmarked for automatic veNFT locking
 
-2. The split is determined by the auto-lock percentage, which can be configured:
-   - **Per-pool**: `autoLockConfigByPool[pool].percentage` (if enabled)
-   - **Default**: `defaultAutoLockPercentage` (fallback for pools without per-pool config)
-   - **Cap**: Auto-lock percentage is limited to a maximum of 75% (enforced on-chain)
-   - Target at launch: ~50% of SWITCH rewards auto-locked
+2. The split is determined by the auto-lock percentage, which is configured per-pool with a tiered approach:
+   - **Native pools** (SWITCH/WPLS, SWITCH/DAI): **50%** auto-locked — balances governance compounding with farmer liquidity
+   - **Non-native pools** (WPLS/DAI, USDC/DAI): **75%** auto-locked — maximizes governance alignment on pools where farmers are less likely to need liquid SWITCH
+   - **On-chain cap**: `MAX_AUTO_LOCK_PERCENTAGE = 7500` (75% maximum, enforced in `V4EternalFarming`)
+   - **Per-pool override**: `autoLockConfigByPool[pool]` allows governance to adjust each pool independently
+   - **Default fallback**: `defaultAutoLockPercentage` applies to pools without explicit configuration
 
 3. When the user claims locked rewards:
    - If `immediateLockOnClaim` is enabled (default: true), the contract attempts to create a veNFT immediately via `create_lock_for(amount, MAXTIME, recipient)`
@@ -749,6 +767,38 @@ Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH toke
 - **DripVotingReward DoS protection**: Catch-up is capped at 52 periods per call to prevent unbounded gas consumption
 - **Minimum shares**: ALM vaults enforce a minimum share amount (1000 wei) to prevent share inflation attacks
 
+### 12.7 Governance Decentralization Roadmap
+
+At launch, the deployer address holds admin keys for operational agility during the bootstrapping phase. The protocol follows a deliberate three-phase decentralization path:
+
+**Phase 1 — Launch (Weeks 0-4)**: The deployer retains direct ownership of upgradeable contracts to enable rapid response to any issues discovered in the live environment. All admin actions are logged and auditable on-chain.
+
+**Phase 2 — Timelock Transfer (Post-Stabilization)**: Once the protocol is operating smoothly, ownership of all upgradeable contracts (SWITCH token, VotingEscrow, Voter, Minter, ProtocolFeeManager, ALM vaults) is transferred to the `SwitchXTimelock` — an OpenZeppelin `TimelockController` with a configurable minimum delay. This ensures that all upgrades and parameter changes are publicly queued before execution, giving the community time to review and react.
+
+**Phase 3 — Community Governance**: Proposer and executor roles on the timelock are transitioned to a community multisig or on-chain governance module, completing the path from deployer-controlled to community-governed.
+
+The `SwitchXTimelock` contract is deployed as part of the protocol's periphery infrastructure and is ready for ownership transfer from day one.
+
+### 12.8 Risk Factors
+
+Users should be aware of the following risks inherent to the SwitchX protocol and DeFi participation generally:
+
+**Smart Contract Risk**: Despite multiple audits (Section 15), smart contracts may contain undiscovered vulnerabilities. Novel features (burn locks, auto-lock, DripVotingReward, MEV recapture) introduce complexity beyond the audited upstream Uniswap V3 engine.
+
+**Impermanent Loss**: Concentrated liquidity positions — whether managed directly or through ALM vaults — are subject to impermanent loss when prices move significantly. ALM vault automation reduces but does not eliminate this risk.
+
+**Oracle Manipulation**: While TWAP-based protections guard against flash loan manipulation (Section 12.3), sustained multi-block price manipulation could potentially affect fee buyback pricing, ALM rebalance triggers, or deposit/withdrawal valuations.
+
+**Admin Key Risk**: During the launch phase (Phase 1), the deployer retains direct control over upgradeable contracts. A compromise of the deployer key could result in malicious upgrades. This risk is mitigated by the planned timelock transfer (Section 12.7).
+
+**PulseChain Dependencies**: SwitchX is deployed exclusively on PulseChain. Users are exposed to chain-level risks including validator concentration, network congestion, RPC availability, and bridge security for assets bridged from other chains.
+
+**Liquidity Risk**: Low-liquidity pools may experience high slippage, and MEV recapture profitability depends on sufficient liquidity depth on both SwitchX and PulseX.
+
+**Irreversibility of Burn Locks**: Burn locks permanently destroy the underlying SWITCH tokens. This is by design, but users should understand that burned tokens can never be recovered regardless of future circumstances.
+
+**Regulatory Uncertainty**: The regulatory status of DeFi protocols, governance tokens, and ve(3,3) mechanisms varies by jurisdiction and may change over time.
+
 ---
 
 ## 13. What Sets SwitchX Apart
@@ -762,7 +812,7 @@ Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH toke
 | **Early Exit** | Not possible (wait for expiry) | Penalty-based with 3 curve options (10-100%) |
 | **Fee Distribution** | Immediate 100% per period | Drip-based (10%/period from pool) |
 | **Fee Processing** | Direct passthrough to voters | 50% SWITCH buyback + 50% passthrough |
-| **Farm Rewards** | 100% liquid | ~50% auto-locked for 2 years |
+| **Farm Rewards** | 100% liquid | 50-75% auto-locked for 2 years (tiered by pool) |
 | **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed |
 | **MEV Protection** | None; users vulnerable to sandwich attacks | Backrun fee surcharge makes sandwiches unprofitable |
 | **Swap Fees** | Static fee tiers | Volatility-adaptive + same-block MEV surcharge |
@@ -834,6 +884,24 @@ After 2.5 years, SWITCH reaches a fundamentally different equilibrium than any p
 - **Self-sustaining governance**: veNFT holders are rewarded purely from protocol revenue (trading fees + MEV recapture), not from inflationary emissions
 
 This creates a protocol where long-term holders benefit from a progressively favorable supply/demand dynamic, without relying on continuous growth to offset dilution.
+
+### 13.4 Post-Emission Sustainability (Year 3+)
+
+A common objection to fixed-supply tokenomics is: "What happens when emissions end? Won't LPs leave?"
+
+SwitchX is designed to be self-sustaining after emissions end, through multiple revenue streams that do not depend on token inflation:
+
+**1. Trading Fee Revenue**: Liquidity providers earn swap fees directly from trading volume. This is the fundamental LP incentive that exists independent of any emission schedule — and it is the same mechanism that sustains Uniswap, Curve, and every other fee-generating AMM.
+
+**2. Fee Buyback Demand**: The ProtocolFeeManager continues to buy SWITCH on the open market using 50% of all trading fees, creating persistent demand-side pressure that replaces emission-driven incentives.
+
+**3. Community-Funded Farming**: V4EternalFarming supports permissionless reward top-ups via `addRewards()`. Any party — the treasury, partner protocols, or community DAOs — can fund farming incentives for specific pools by depositing reward tokens directly. This enables targeted, sustainable incentive programs without protocol-level inflation.
+
+**4. veNFT Revenue Compounding**: Voters who have accumulated burn locks and auto-locked positions continue earning trading fees, MEV recapture rewards, and early exit penalty distributions. The lack of dilution from new emissions means these revenue streams become relatively more valuable over time.
+
+**5. Progressive Scarcity**: Each year after emissions end, burn locks, early exit penalties, and fee buybacks continue reducing circulating supply — making the remaining tokens scarcer while revenue generation continues.
+
+The key insight is that emissions are a bootstrapping mechanism, not a permanent dependency. Once sufficient TVL and trading volume are established, the protocol sustains itself through the same fee-based economics that power every successful DEX.
 
 ---
 
@@ -984,8 +1052,13 @@ The result is a deflationary token with increasing scarcity over time — the op
 
 ### Audits
 
-The protocol has been audited by multiple firms. Reports are available in the `audits/` directory:
+The protocol has been audited at multiple layers. All reports are available in the [`audits/`](audits/) directory.
 
+**SwitchX Protocol Audits** (covering SwitchX-specific features: ve(3,3) governance, burn locks, auto-lock, MEV recapture, DripVotingReward, ProtocolFeeManager, early exit, tiered emissions):
+- **SpyWolf**: [`switchx-audit-report-spywolf.pdf`](audits/switchx-audit-report-spywolf.pdf)
+- **33Audits**: [`switchx-audit-report-33audits.pdf`](audits/switchx-audit-report-33audits.pdf)
+
+**Underlying Uniswap V3/V4 Engine Audits** (covering the core AMM, plugin system, farming, and periphery contracts that SwitchX is built on):
 - Core: MixBytes, Bailsec (v1.2, v1.2.1)
 - Farming & Base Plugin: MixBytes
 - Entire protocol: Riley Holterhus, Paladin
