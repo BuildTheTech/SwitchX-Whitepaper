@@ -66,7 +66,7 @@ SwitchX addresses these problems through a coordinated set of mechanisms:
 
 6. **MEV recapture.** An integrated afterSwap hook system detects arbitrage opportunities and executes backrun trades, returning the profit to ve(3,3) voters.
 
-7. **Adaptive fees.** Volatility-responsive fee curves and same-block MEV surcharges ensure the protocol captures fair value across all market conditions.
+7. **Adaptive fees.** Volatility-responsive fee curves, same-block MEV surcharges, and cross-DEX oracle-based LVR fees ensure the protocol captures fair value across all market conditions.
 
 8. **Automated liquidity management.** Protocol-native ALM vaults manage concentrated liquidity positions using TWAP-driven rebalancing with volatility-adaptive range widths.
 
@@ -95,9 +95,10 @@ SwitchX is built on a modular architecture where each layer composes with the ne
                              │
 ┌────────────────────────────┴────────────────────────────────────┐
 │                       PLUGIN LAYER                              │
-│  SwitchXBasePlugin: DynamicFee · BackrunFee · FeeDiscount       │
-│  SecurityPlugin · LimitOrderPlugin · MevBackrunPlugin           │
-│  VolatilityOraclePlugin · FarmingProxyPlugin · AlmPlugin        │
+│  SwitchXBasePlugin: DynamicFee · BackrunFee · CrossDexOracleFee  │
+│  FeeDiscount · SecurityPlugin · LimitOrderPlugin                │
+│  MevBackrunPlugin · VolatilityOraclePlugin · FarmingProxyPlugin │
+│  AlmPlugin                                                      │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────┴────────────────────────────────────┐
@@ -117,7 +118,7 @@ SwitchX is built on a modular architecture where each layer composes with the ne
 
 **Periphery** — User-facing contracts. NonfungiblePositionManager wraps liquidity positions as ERC721 tokens. SwapRouter provides stateless swap execution. Quoter enables off-chain swap simulation.
 
-**Plugin** — An extensible hook system attached to each pool. Plugins use a bitmap-driven configuration (uint8 `pluginConfig`) to selectively enable lifecycle hooks: `beforeInitialize`, `afterInitialize`, `beforeModifyPosition`, `afterModifyPosition`, `beforeSwap`, `afterSwap`, `beforeFlash`, `afterFlash`, and `handlePluginFee`. The `SwitchXBasePlugin` composes nine sub-plugins into a single contract that handles adaptive fees, MEV protection, oracle tracking, farming integration, ALM rebalancing, limit orders, security states, fee discounts, and MEV backrun execution.
+**Plugin** — An extensible hook system attached to each pool. Plugins use a bitmap-driven configuration (uint8 `pluginConfig`) to selectively enable lifecycle hooks: `beforeInitialize`, `afterInitialize`, `beforeModifyPosition`, `afterModifyPosition`, `beforeSwap`, `afterSwap`, `beforeFlash`, `afterFlash`, and `handlePluginFee`. The `SwitchXBasePlugin` composes ten sub-plugins into a single contract that handles adaptive fees, MEV protection, cross-DEX LVR capture, oracle tracking, farming integration, ALM rebalancing, limit orders, security states, fee discounts, and MEV backrun execution.
 
 **Farming** — Perpetual reward distribution. V4EternalFarming manages incentive programs with virtual tick-based reward accounting. FarmingCenter coordinates position enrollment and reward collection, including the auto-lock mechanism.
 
@@ -155,7 +156,9 @@ The DynamicFeePlugin calculates the override fee based on recent price volatilit
 
 ### 4.3 Community Fee
 
-A configurable portion of all swap fees is diverted to the ve(3,3) system through the community fee mechanism. At launch, this is set to **30%** (`communityFeeFloor = 300`), meaning 30% of every swap fee collected flows to the Voter contract for distribution to veNFT holders who vote on that pool's gauge.
+A configurable portion of all swap fees is diverted to the ve(3,3) system through the community fee mechanism. At launch, this is set to **75%** (`communityFee = 750`), meaning 75% of every swap fee collected flows to the Voter contract for distribution to veNFT holders who vote on that pool's gauge. The remaining 25% accrues directly to liquidity providers (including ALM vault depositors).
+
+This split maximizes voter revenue — strengthening the ve(3,3) flywheel — while still leaving meaningful fee income for ALM vault depositors alongside their farming emissions. Industry benchmarks (Aerodrome, Velodrome) route 100% to voters; SwitchX's 75% ensures ALM vault depositors retain a direct fee incentive even after emissions end.
 
 This creates the core ve(3,3) feedback loop: voters direct emissions to pools → pools generate fees → fees flow to voters → voters are incentivized to direct emissions to the highest-yielding pools.
 
@@ -196,6 +199,23 @@ fee = baseFee + f(volatilityAverage, alpha1, alpha2, beta1, beta2, gamma1, gamma
 
 When `alpha1` and `alpha2` are both zero, the plugin returns a flat `baseFee` — allowing pools to opt out of dynamic pricing.
 
+**Tiered Fee Configuration:**
+
+Each pool has its adaptive fee curve configured independently based on competitive dynamics and asset characteristics:
+
+| Pool | Base Fee | Max Fee | Strategy |
+|------|----------|---------|----------|
+| **WPLS/DAI** | 0.20% | 1.00% | Competitive — undercuts PulseX's fixed 0.26% at low volatility |
+| **SWITCH/DAI** | 0.30% | 1.00% | Monopoly — SwitchX is the only venue for SWITCH trading |
+| **SWITCH/WPLS** | 0.30% | 1.00% | Monopoly — same rationale as SWITCH/DAI |
+| **USDC/DAI** | 0.20% | 0.30% | Stablecoin — narrow range, fee stays near base during normal conditions |
+
+The WPLS/DAI base fee is set to capture more value per swap than the default while remaining competitive with PulseX (0.26% fixed). At low volatility, the adaptive fee sits near the 0.20% base — a meaningful undercut. During volatile periods, fees rise toward 1.0% to compensate LPs for impermanent loss.
+
+SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWITCH liquidity. Every SWITCH trade must route through SwitchX, so there is no competitive pressure to minimize fees. The 0.30% base captures more value for voters on every SWITCH trade while the 1.0% max provides IL protection during volatile markets.
+
+The USDC/DAI stablecoin pair uses a narrow adaptive range (0.20%–0.30%) because stablecoins exhibit minimal volatility. The fee sits near 0.20% under normal conditions and only rises to 0.30% during depeg/stress events.
+
 ### 5.2 MEV Protection (Bot-Proof Backrun Fee)
 
 A **sandwich attack** is the most common form of MEV extraction on DEXs: an attacker front-runs a user's swap to move the price against them, then back-runs (reverses direction) immediately after to capture the difference as profit. The victim receives worse execution, effectively paying a hidden tax to the attacker. On many DEXs this occurs silently and at scale.
@@ -209,11 +229,61 @@ The `BackrunFeePlugin` eliminates this attack vector by making the back-run leg 
 
 **Why regular users are unaffected**: The surcharge only triggers on same-block direction reversals — a pattern that characterizes sandwich back-runs, not ordinary trading. Users swapping in different blocks, or in the same direction as the prior price movement, always pay the standard fee. In practice, this means normal traders never see the surcharge while sandwich bots face fees that exceed their expected profit, making the attack unprofitable.
 
-### 5.3 Fee Discount Plugin
+### 5.3 Cross-DEX LVR Protection (Oracle Fee)
+
+The BackrunFeePlugin (Section 5.2) protects against sandwich attacks that originate within SwitchX — but a significant class of MEV occurs across DEXs. When a user swaps on PulseX, the resulting price movement creates an arbitrage opportunity against SwitchX. External bots exploit this by trading on SwitchX at the normal fee to correct the price discrepancy. This is known as **Loss-Versus-Rebalancing (LVR)** — the value that liquidity providers lose to informed arbitrageurs correcting stale prices.
+
+The `CrossDexOracleFeePlugin` addresses this by reading PulseX pair reserves on every swap and applying a proportional surcharge to corrective (arbitrage-direction) trades:
+
+**How it works:**
+
+1. The plugin reads the external PulseX pair's reserves to derive its current price
+2. It compares this against the SwitchX pool's `sqrtPriceX96`
+3. If the swap moves the SwitchX price **toward** the external price (corrective / arb direction), a surcharge is applied
+4. The surcharge is proportional to the price deviation, minus the existing dynamic + backrun fee (no double-charging)
+5. Safety guard: same-block reserve updates and stale oracle reserves (>30 minutes old) are ignored to reduce reserve-skew manipulation risk
+
+**Surcharge formula:**
+
+```
+targetFee = deviationBps × captureRate
+surcharge = max(0, targetFee − existingFee)
+totalFee  = existingFee + min(surcharge, cap)
+```
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stalenessFeeFactor` | 5,000 (50%) | Fraction of deviation targeted as total fee |
+| `stalenessFeeCapHBips` | 30,000 (3%) | Maximum surcharge cap |
+| `minDeviationBps` | 20 (0.2%) | Noise filter — deviations below this are ignored |
+| `maxOracleReserveAge` | 1,800s (30 min) | Fail-open if external reserve timestamp is stale |
+
+**Direction detection:**
+
+The plugin only surcharges swaps that correct the price discrepancy:
+- If SwitchX price is **higher** than PulseX → only `zeroToOne` swaps (pushing price down) are surcharged
+- If SwitchX price is **lower** than PulseX → only `oneToZero` swaps (pushing price up) are surcharged
+- Swaps in the opposite (non-corrective) direction always pay the normal fee
+
+**Interaction with other fee components:**
+
+The `max(0, targetFee − existingFee)` formula ensures that the backrun fee (Section 5.2) and cross-DEX oracle fee never double-charge. If the backrun fee already exceeds the cross-DEX target, no additional surcharge is applied. The total fee is effectively `max(backrunFee, crossDexTargetFee)`.
+
+**PulseX pair auto-selection:**
+
+The `setPulseXPairFromFactories()` function queries both PulseX V1 and V2 factories, scores each pair by `reserve0 × reserve1` (liquidity depth), and selects the deepest-liquidity pair. Token ordering alignment is auto-detected. If neither factory has the pair, the feature gracefully degrades (no surcharge applied).
+
+**Why this matters for LPs:**
+
+Without LVR protection, liquidity providers subsidize every arbitrage trade — each time an external bot corrects a stale SwitchX price, the LP effectively sells at the old (worse) price. The cross-DEX oracle fee ensures that a portion of this correction value is captured as fee revenue for the pool, making LP positions more profitable and reducing the hidden cost of providing liquidity.
+
+### 5.4 Fee Discount Plugin
 
 The `FeeDiscountPlugin` allows per-user fee reductions, enabling loyalty programs, partner integrations, or volume-based discounts. Discounts are applied after the base fee and backrun surcharge are calculated.
 
-### 5.4 Security Plugin
+### 5.5 Security Plugin
 
 The `SecurityPlugin` controls pool access through configurable security states:
 
@@ -226,7 +296,7 @@ The `SecurityPlugin` controls pool access through configurable security states:
 
 This allows pool operators to pause trading during emergencies, enable graceful wind-downs (burn-only mode), or disable flash loans while keeping swaps active.
 
-### 5.5 Limit Order Plugin
+### 5.6 Limit Order Plugin
 
 The `LimitOrderPlugin` enables on-chain limit order execution through the `afterSwap` hook — no off-chain keepers or relayers required.
 
@@ -306,7 +376,7 @@ This produces a base rate of approximately 19.03 SWITCH per second (≈1,644,000
 
 ### 6.5 Treasury Allocation
 
-**5%** of all emissions (`TREASURY_RATE = 500`) are directed to the protocol treasury. The remaining 95% flows to the Voter contract for distribution to gauges based on veNFT votes.
+**10%** of all emissions (`TREASURY_RATE = 1000`) are directed to the protocol treasury to maintain governance power in the early days & prevent hostile takeover. This will be scaled down over time as the protocol matures. The remaining 90% flows to the Voter contract for distribution to gauges based on veNFT votes.
 
 ### 6.6 Why Fixed Supply Matters
 
@@ -453,7 +523,7 @@ This creates the ve(3,3) alignment: voters are incentivized to direct emissions 
 ### 8.2 Community Fee Collection
 
 When a swap occurs in any pool:
-1. The community fee percentage (e.g., 30%) of the swap fee is collected by `V4CommunityVault`
+1. The community fee percentage (75%) of the swap fee is collected by `V4CommunityVault`
 2. The Voter contract claims these fees during the `distribute()` call
 3. Fees are routed through the `ProtocolFeeManager` for processing
 4. Processed fees are deposited into the pool's `DripVotingReward` contract
@@ -546,8 +616,9 @@ The auto-lock system is SwitchX's mechanism for compounding governance alignment
 
 2. The split is determined by the auto-lock percentage, which is configured per-pool with a tiered approach:
    - **Native pools** (SWITCH/WPLS, SWITCH/DAI): **50%** auto-locked — balances governance compounding with farmer liquidity
-   - **Non-native pools** (WPLS/DAI, USDC/DAI): **75%** auto-locked — maximizes governance alignment on pools where farmers are less likely to need liquid SWITCH
-   - **On-chain cap**: `MAX_AUTO_LOCK_PERCENTAGE = 7500` (75% maximum, enforced in `V4EternalFarming`)
+   - **Non-native pools** (WPLS/DAI): **75%** auto-locked — standard non-SWITCH pool, lighter friction for routing backbone
+   - **Vampire pools** (USDC/DAI): **90%** auto-locked — maximum anti-mercenary protection; zero-IL stablecoin pair where farmers have no need for liquid SWITCH
+   - **On-chain cap**: `MAX_AUTO_LOCK_PERCENTAGE = 9000` (90% maximum, enforced in `V4EternalFarming`)
    - **Per-pool override**: `autoLockConfigByPool[pool]` allows governance to adjust each pool independently
    - **Default fallback**: `defaultAutoLockPercentage` applies to pools without explicit configuration
 
@@ -607,9 +678,13 @@ function _isMevInternalSwap(address sender, bytes calldata) internal view return
 ```
 
 Internal swaps receive special treatment:
-- **Zero swap fee**: The executor pays no fees on its routing leg through SwitchX (`outFee = 0` in `beforeSwap`)
-- **No backrun surcharge**: The backrun fee plugin is bypassed for internal swaps
+- **Zero swap fee**: The executor pays no fees on its routing leg through SwitchX (`outFee = 1` sentinel in `beforeSwap`)
+- **No backrun or LVR surcharge**: Both the backrun fee plugin and the cross-DEX oracle fee plugin are bypassed for internal swaps
 - **Full hook execution**: Farming virtual pool ticks and limit order state are still updated to maintain consistency
+
+**Complementary relationship with LVR protection:**
+
+The MEV recapture system and the cross-DEX oracle fee (Section 5.3) work together to capture value from cross-DEX arbitrage. The MEV executor performs the protocol's own backrun trades at near-zero cost, capturing the arbitrage profit for ve(3,3) voters. For any residual cross-DEX deviation that the protocol's bot doesn't capture (e.g., due to gas costs, timing, or insufficient profitability), the cross-DEX oracle fee ensures that external arb bots still pay a proportional surcharge — meaning the LP value is protected regardless of who executes the corrective trade.
 
 ### 10.4 Profit Distribution
 
@@ -695,7 +770,16 @@ The manager classifies market conditions into volatility tiers and adjusts posit
 | **High** | 600 - 2,500 bps | Wider base and limit positions |
 | **Extreme** | > 2,500+ bps | Maximum width safety positions, may pause deposits |
 
-At launch, day-0 widths prioritize safety: `baseNormal=15%`, `limitNormal=5%`, `baseHigh=50%`, `limitHigh=20%`. These can be tightened after volatility subsides to improve capital efficiency.
+Width configuration is pool-type-aware:
+
+| Parameter | Volatile Pairs | Stablecoin (USDC/DAI) |
+|-----------|---------------|----------------------|
+| baseNormal | 15% | 3% |
+| limitNormal | 5% | 1% |
+| baseHigh | 50% | 10% |
+| limitHigh | 20% | 4% |
+
+Volatile pairs use wide day-0 safety margins for launch; stablecoin pairs use tight ranges for capital efficiency near the 1:1 peg. Stablecoin managers also apply tighter volatility gates (`priceChange=0.5%`, `lowVol=0.5%`, `highVol=2%`, `extremeVol=5%`) to detect and react to even small depegging events earlier.
 
 ### 11.3 Farming Integration
 
@@ -725,7 +809,7 @@ All token transfers in the core protocol use the callback pattern (Section 4.4),
 
 ### 12.2 Plugin Security States
 
-The SecurityPlugin (Section 5.4) provides granular control over pool operations, allowing administrators to:
+The SecurityPlugin (Section 5.5) provides granular control over pool operations, allowing administrators to:
 - Halt all trading during emergencies
 - Enable burn-only mode for graceful wind-downs
 - Disable flash loans while keeping swaps active
@@ -812,10 +896,12 @@ Users should be aware of the following risks inherent to the SwitchX protocol an
 | **Early Exit** | Not possible (wait for expiry) | Penalty-based with 3 curve options (10-100%) |
 | **Fee Distribution** | Immediate 100% per period | Drip-based (10%/period from pool) |
 | **Fee Processing** | Direct passthrough to voters | 50% SWITCH buyback + 50% passthrough |
-| **Farm Rewards** | 100% liquid | 50-75% auto-locked for 2 years (tiered by pool) |
+| **Farm Rewards** | 100% liquid | 50-90% auto-locked for 2 years (three tiers: native 50%, non-native 75%, vampire 90%) |
 | **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed |
 | **MEV Protection** | None; users vulnerable to sandwich attacks | Backrun fee surcharge makes sandwiches unprofitable |
-| **Swap Fees** | Static fee tiers | Volatility-adaptive + same-block MEV surcharge |
+| **LVR Protection** | None; arb bots extract LP value at standard fees | Cross-DEX oracle fee captures LVR from corrective arb swaps |
+| **Community Fee** | Varies (typically 100% to voters) | 75% to voters, 25% to LPs — balances flywheel strength with ALM vault returns |
+| **Swap Fees** | Static fee tiers | Tiered volatility-adaptive fees (0.2%–0.3% base) + MEV surcharge + LVR surcharge |
 | **Liquidity Management** | Manual positions | Automated ALM vaults with TWAP rebalancing |
 | **Exit Penalty Distribution** | N/A | 50% burned, 50% to voters |
 
@@ -871,6 +957,7 @@ Each mechanism reinforces the others:
 - **Early exit burns** remove tokens while rewarding committed voters
 - **Drip rewards** smooth volatility, making governance yields more predictable
 - **MEV recapture** returns leaked value to voters
+- **LVR protection** ensures cross-DEX arbitrage profits are shared with LPs
 - **Adaptive fees** optimize revenue capture across market conditions
 - **ALM vaults** maximize capital efficiency and fee generation
 
@@ -921,7 +1008,7 @@ The key insight is that emissions are a bootstrapping mechanism, not a permanent
 | Year 2.5 Rate | ~4.76 SWITCH/second |
 | Year 2.5 Daily | ~411,000 SWITCH/day |
 | Emission Duration | 2.5 years (912.5 days) |
-| Treasury Share | 5% of all emissions |
+| Treasury Share | 10% of all emissions |
 
 ### 14.2 Base Rate Derivation
 
@@ -1016,6 +1103,7 @@ The result is a deflationary token with increasing scarcity over time — the op
 | SwitchXBasePlugin | `src/plugin/contracts/SwitchXBasePlugin.sol` |
 | DynamicFeePlugin | `src/plugin/contracts/plugins/DynamicFeePlugin.sol` |
 | BackrunFeePlugin | `src/plugin/contracts/plugins/BackrunFeePlugin.sol` |
+| CrossDexOracleFeePlugin | `src/plugin/contracts/plugins/CrossDexOracleFeePlugin.sol` |
 | MevBackrunPlugin | `src/plugin/contracts/plugins/MevBackrunPlugin.sol` |
 | SecurityPlugin | `src/plugin/contracts/plugins/SecurityPlugin.sol` |
 | VotingEscrow | `src/voting/contracts/VotingEscrow.sol` |
@@ -1039,12 +1127,15 @@ The result is a deflationary token with increasing scarcity over time — the op
 | feeSplitBps | 5,000 (50/50) | `VotingEscrow.sol:107` |
 | DEFAULT_DRIP_RATE | 1,000 (10%) | `scripts/deployAll.js:34` |
 | buybackBps | 5,000 (50%) | `src/voting/scripts/deploy.js:226` |
-| TREASURY_RATE | 500 (5%) | `scripts/deployAll.js:24` |
-| DEFAULT_COMMUNITY_FEE | 300 (30%) | `scripts/deployAll.js:29` |
+| TREASURY_RATE | 1000 (10%) | `scripts/deployAll.js:24` |
+| DEFAULT_COMMUNITY_FEE | 750 (75%) | `scripts/deployAll.js:44` |
 | Emission Duration | 2.5 years | `Minter.sol:196` |
 | Base Rate Formula | `(budget×8)/(13×YEAR)` | `Minter.sol:198` |
 | Backrun Fee Factor | 5,000 (6x total) | `BackrunFeePlugin.sol:13` |
 | Max Backrun Factor | 10,000 (11x total) | `BackrunFeePlugin.sol:12` |
+| LVR Capture Rate | 5,000 (50%) | `CrossDexOracleFeePlugin.sol:44` |
+| LVR Surcharge Cap | 30,000 (3%) | `CrossDexOracleFeePlugin.sol:45` |
+| LVR Min Deviation | 20 (0.2%) | `CrossDexOracleFeePlugin.sol:46` |
 | ALM Fast TWAP | 15 minutes | `scripts/deployAll.js:51` |
 | ALM Slow TWAP | 2 hours | `scripts/deployAll.js:52` |
 | Min Rebalance Interval | 600 seconds | `scripts/deployAll.js:54` |
