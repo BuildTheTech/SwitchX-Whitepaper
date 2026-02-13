@@ -208,13 +208,13 @@ Each pool has its adaptive fee curve configured independently based on competiti
 | **WPLS/DAI** | 0.20% | 1.00% | Competitive — undercuts PulseX's fixed 0.26% at low volatility |
 | **SWITCH/DAI** | 0.30% | 1.00% | Monopoly — SwitchX is the only venue for SWITCH trading |
 | **SWITCH/WPLS** | 0.30% | 1.00% | Monopoly — same rationale as SWITCH/DAI |
-| **USDC/DAI** | 0.20% | 0.30% | Stablecoin — narrow range, fee stays near base during normal conditions |
+| **USDC/DAI** | 0.20% | 1.00% | Stablecoin — fee stays near 0.20% at low vol; full 1.0% max protects LPs during depeg |
 
 The WPLS/DAI base fee is set to capture more value per swap than the default while remaining competitive with PulseX (0.26% fixed). At low volatility, the adaptive fee sits near the 0.20% base — a meaningful undercut. During volatile periods, fees rise toward 1.0% to compensate LPs for impermanent loss.
 
 SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWITCH liquidity. Every SWITCH trade must route through SwitchX, so there is no competitive pressure to minimize fees. The 0.30% base captures more value for voters on every SWITCH trade while the 1.0% max provides IL protection during volatile markets.
 
-The USDC/DAI stablecoin pair uses a narrow adaptive range (0.20%–0.30%) because stablecoins exhibit minimal volatility. The fee sits near 0.20% under normal conditions and only rises to 0.30% during depeg/stress events.
+The USDC/DAI stablecoin pair uses the same adaptive curve as WPLS/DAI (0.20% base, 1.0% max). Under normal conditions, stablecoins exhibit minimal volatility, so the fee stays near 0.20%. During depeg events (e.g., USDC dropping to $0.87 as in March 2023), the fee rises toward 1.0% to compensate LPs for impermanent loss. This full-range protection is appropriate because USDC/DAI is positioned as a vampire pool (1% deposit + 1% withdraw vault fees, 90% auto-lock) where competitiveness is secondary to LP protection and voter revenue capture.
 
 ### 5.2 MEV Protection (Bot-Proof Backrun Fee)
 
@@ -652,7 +652,7 @@ On PulseChain, the primary arbitrage venue is between SwitchX pools and PulseX (
 
 ### 10.2 MEV Backrun Architecture
 
-SWITCH implements an `afterSwap` hook-based MEV recapture system through the `MevBackrunPlugin`:
+SwitchX implements an `afterSwap` hook-based MEV recapture system through the `MevBackrunPlugin`:
 
 ```
 1. User swap executes on SwitchX pool
@@ -762,13 +762,13 @@ Rebalancing is triggered through the `AlmPlugin`'s `afterSwap` hook when:
 
 **Volatility Tiers:**
 
-The manager classifies market conditions into volatility tiers and adjusts position widths accordingly:
+The manager classifies market conditions into volatility tiers and adjusts position widths accordingly. Thresholds are configurable per pool:
 
-| Tier | Threshold | Effect |
-|------|-----------|--------|
-| **None/Low** | < 600 bps | Standard position widths |
-| **High** | 600 - 2,500 bps | Wider base and limit positions |
-| **Extreme** | > 2,500+ bps | Maximum width safety positions, may pause deposits |
+| Tier | Volatile Default | Stablecoin Default | Effect |
+|------|-----------------|-------------------|--------|
+| **Low** | < 300 bps (3%) | < 50 bps (0.5%) | Standard position widths |
+| **High** | > 2,500 bps (25%) | > 200 bps (2%) | Wider base and limit positions |
+| **Extreme** | > 8,000 bps (80%) | > 500 bps (5%) | Maximum width safety positions, may pause deposits |
 
 Width configuration is pool-type-aware:
 
@@ -918,11 +918,11 @@ These mechanisms combine into a self-reinforcing economic flywheel:
          ┌─────────────────────┼─────────────────────┐
          │                     │                     │
          ▼                     ▼                     ▼
-┌────────────────┐  ┌──────────────────┐  ┌──────────────────┐
-│ Auto-Lock (50%)│  │  Fee Buybacks    │  │ Early Exit Burns │
-│ Compounds      │  │  Buy Pressure    │  │ Supply Reduction │
-│ Governance     │  │  on SWITCH       │  │ + Voter Rewards  │
-└────────┬───────┘  └────────┬─────────┘  └────────┬─────────┘
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐
+│ Auto-Lock(50-90%)│  │  Fee Buybacks    │  │ Early Exit Burns │
+│ Compounds        │  │  Buy Pressure    │  │ Supply Reduction │
+│ Governance       │  │  on SWITCH       │  │ + Voter Rewards  │
+└────────┬─────────┘  └────────┬─────────┘  └────────┬─────────┘
          │                   │                     │
          └───────────┬───────┘                     │
                      │                             │
@@ -1125,20 +1125,20 @@ The result is a deflationary token with increasing scarcity over time — the op
 | minEarlyExitFeeBps | 1,000 (10%) | `VotingEscrow.sol:105` |
 | feeDecayType | INVERSE_QUADRATIC | `VotingEscrow.sol:106` |
 | feeSplitBps | 5,000 (50/50) | `VotingEscrow.sol:107` |
-| DEFAULT_DRIP_RATE | 1,000 (10%) | `scripts/deployAll.js:34` |
-| buybackBps | 5,000 (50%) | `src/voting/scripts/deploy.js:226` |
-| TREASURY_RATE | 1000 (10%) | `scripts/deployAll.js:24` |
+| DEFAULT_DRIP_RATE | 1,000 (10%) | `scripts/deployAll.js:53` |
+| buybackBps | 5,000 (50%) | `src/voting/scripts/deploy.js:240` |
+| TREASURY_RATE | 1000 (10%) | `scripts/deployAll.js:37` |
 | DEFAULT_COMMUNITY_FEE | 750 (75%) | `scripts/deployAll.js:44` |
 | Emission Duration | 2.5 years | `Minter.sol:196` |
 | Base Rate Formula | `(budget×8)/(13×YEAR)` | `Minter.sol:198` |
-| Backrun Fee Factor | 5,000 (6x total) | `BackrunFeePlugin.sol:13` |
-| Max Backrun Factor | 10,000 (11x total) | `BackrunFeePlugin.sol:12` |
-| LVR Capture Rate | 5,000 (50%) | `CrossDexOracleFeePlugin.sol:44` |
-| LVR Surcharge Cap | 30,000 (3%) | `CrossDexOracleFeePlugin.sol:45` |
-| LVR Min Deviation | 20 (0.2%) | `CrossDexOracleFeePlugin.sol:46` |
-| ALM Fast TWAP | 15 minutes | `scripts/deployAll.js:51` |
-| ALM Slow TWAP | 2 hours | `scripts/deployAll.js:52` |
-| Min Rebalance Interval | 600 seconds | `scripts/deployAll.js:54` |
+| Backrun Fee Factor | 5,000 (6x total) | `BackrunFeePlugin.sol:15` |
+| Max Backrun Factor | 10,000 (11x total) | `BackrunFeePlugin.sol:13` |
+| LVR Capture Rate | 5,000 (50%) | `CrossDexOracleFeePlugin.sol:51` |
+| LVR Surcharge Cap | 30,000 (3%) | `CrossDexOracleFeePlugin.sol:52` |
+| LVR Min Deviation | 20 (0.2%) | `CrossDexOracleFeePlugin.sol:53` |
+| ALM Fast TWAP | 15 minutes | `scripts/deployAll.js:70` |
+| ALM Slow TWAP | 2 hours | `scripts/deployAll.js:71` |
+| Min Rebalance Interval | 600 seconds | `scripts/deployAll.js:73` |
 | Drip Catchup Limit | 52 periods | `DripVotingReward.sol:34` |
 
 ### Audits
