@@ -311,7 +311,7 @@ The `LimitOrderPlugin` enables on-chain limit order execution through the `after
 - **Gas efficient**: Epoch batching amortizes gas costs across all orders at the same price point
 - **Composable**: Works alongside dynamic fees, farming, and ALM without conflicts
 
-Limit orders are disabled for pools with narrow tick spacing (e.g., SWITCH token pools) where large price movements could cause excessive tick iteration in the `afterSwap` hook.
+For launch, limit-order hooks are disabled on ALM launch pools to prioritize swap/rebalance gas safety under narrow tick spacing and volatile conditions; they can be re-enabled per pool after post-launch validation.
 
 ---
 
@@ -587,6 +587,17 @@ If a pool accumulates 10,000 DAI in fees with a 10% drip rate:
 | 10 | ~387 | ~3,487 |
 
 After 10 periods, ~65% of the original fees have been distributed, with the remainder continuing to drip over subsequent periods.
+
+### 8.5 Staged Launch Emission Direction
+
+SwitchX launches with all four core gauges wired from day 1 (`SWITCH/DAI`, `SWITCH/WPLS`, `WPLS/DAI`, `USDC/DAI`), but emissions are directed in staged baselines rather than equal split:
+
+- **Epochs 1-2:** `50 / 20 / 25 / 5`
+- **Epochs 3-4:** `45 / 20 / 25 / 10`
+- **Epochs 5-8:** `40 / 20 / 25 / 15`
+- **Epochs 9-12:** `35 / 20 / 25 / 20`
+
+This policy prioritizes early SWITCH price discovery (`SWITCH/DAI`) while preserving routing depth (`WPLS/DAI`) and keeping stablecoin participation active (`USDC/DAI`) from launch. Weekly adjustments are bounded and KPI-driven to avoid over-correction, and bribe spend scales with treasury vote-share dilution over time.
 
 ---
 
