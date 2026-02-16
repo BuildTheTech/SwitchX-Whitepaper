@@ -60,7 +60,7 @@ SwitchX addresses these problems through a coordinated set of mechanisms:
 
 3. **Automatic reward locking.** A configurable percentage of farming rewards are automatically locked into veNFTs at maximum duration, compounding governance alignment without requiring manual action.
 
-4. **Protocol fee buybacks.** A portion of all trading fees is used to buy SWITCH on the open market, creating consistent demand-side pressure.
+4. **Automatic fee buybacks.** Unlike every other ve(3,3) protocol which passes fees through as raw tokens, SwitchX automatically converts 50% of all trading fees into SWITCH on the open market — creating permanent, revenue-driven buy pressure that scales with protocol volume and continues indefinitely after emissions end.
 
 5. **Drip-based reward smoothing.** Rather than distributing all fees immediately, rewards are pooled and released at a configurable rate per period, reducing volatility and extending reward duration.
 
@@ -205,16 +205,16 @@ Each pool has its adaptive fee curve configured independently based on competiti
 
 | Pool | Base Fee | Max Fee | Strategy |
 |------|----------|---------|----------|
-| **WPLS/DAI** | 0.20% | 1.00% | Competitive — undercuts PulseX's fixed 0.26% at low volatility |
-| **SWITCH/DAI** | 0.30% | 1.00% | Monopoly — SwitchX is the only venue for SWITCH trading |
-| **SWITCH/WPLS** | 0.30% | 1.00% | Monopoly — same rationale as SWITCH/DAI |
+| **USDC/WPLS** | 0.20% | 1.00% | Competitive — undercuts PulseX's fixed 0.26% at low volatility |
+| **SWITCH/USDC** | 0.30% | 1.00% | Monopoly — SwitchX is the only venue for SWITCH trading |
+| **SWITCH/WPLS** | 0.30% | 1.00% | Monopoly — same rationale as SWITCH/USDC |
 | **USDC/DAI** | 0.20% | 1.00% | Stablecoin — fee stays near 0.20% at low vol; full 1.0% max protects LPs during depeg |
 
-The WPLS/DAI base fee is set to capture more value per swap than the default while remaining competitive with PulseX (0.26% fixed). At low volatility, the adaptive fee sits near the 0.20% base — a meaningful undercut. During volatile periods, fees rise toward 1.0% to compensate LPs for impermanent loss.
+The USDC/WPLS base fee is set to capture more value per swap than the default while remaining competitive with PulseX (0.26% fixed). At low volatility, the adaptive fee sits near the 0.20% base — a meaningful undercut. During volatile periods, fees rise toward 1.0% to compensate LPs for impermanent loss.
 
 SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWITCH liquidity. Every SWITCH trade must route through SwitchX, so there is no competitive pressure to minimize fees. The 0.30% base captures more value for voters on every SWITCH trade while the 1.0% max provides IL protection during volatile markets.
 
-The USDC/DAI stablecoin pair uses the same adaptive curve as WPLS/DAI (0.20% base, 1.0% max). Under normal conditions, stablecoins exhibit minimal volatility, so the fee stays near 0.20%. During depeg events (e.g., USDC dropping to $0.87 as in March 2023), the fee rises toward 1.0% to compensate LPs for impermanent loss. This full-range protection is appropriate because USDC/DAI is positioned as a vampire pool (1% deposit + 1% withdraw vault fees, 90% auto-lock) where competitiveness is secondary to LP protection and voter revenue capture.
+The USDC/DAI stablecoin pair uses the same adaptive curve as USDC/WPLS (0.20% base, 1.0% max). Under normal conditions, stablecoins exhibit minimal volatility, so the fee stays near 0.20%. During depeg events (e.g., USDC dropping to $0.87 as in March 2023), the fee rises toward 1.0% to compensate LPs for impermanent loss. This full-range protection is appropriate because USDC/DAI is positioned as a vampire pool (1% deposit + 1% withdraw vault fees, 90% auto-lock) where competitiveness is secondary to LP protection and voter revenue capture.
 
 ### 5.2 MEV Protection (Bot-Proof Backrun Fee)
 
@@ -335,11 +335,11 @@ The 23M premint is allocated as follows:
 | Allocation | Amount | % of Premint | Purpose |
 |-----------|--------|-------------|---------|
 | Governance Burn Lock | 8,000,000 | 34.8% | Permanent 2x voting power (16M vePower) |
-| Liquidity Bootstrapping | 12,000,000 | 52.2% | Initial pool liquidity (SWITCH/DAI, SWITCH/WPLS) |
+| Liquidity Bootstrapping | 12,000,000 | 52.2% | Initial pool liquidity (SWITCH/USDC, SWITCH/WPLS) |
 | Bribe Budget | 2,000,000 | 8.7% | Epochs 1-12 voting incentives |
 | Operational Buffer | 1,000,000 | 4.3% | Team locks, gas, contingencies |
 
-The 8M burn lock creates an initial governance position with 16M vePower (via the 2x burn multiplier), giving the protocol treasury >60% voting control at launch — sufficient to defend against hostile governance attacks during the bootstrapping phase.
+The 8M burn lock creates an initial governance position with 16M vePower (via the 2x burn multiplier), giving the protocol treasury effectively 100% voting control at launch (before external locks exist) and strong defensive capacity during the bootstrapping phase.
 
 ### 6.3 Emission Schedule
 
@@ -491,18 +491,19 @@ The penalty ranges from 10% (near expiry) to 100% (just after locking). The pena
 
 ### 7.5 Governance Power Timeline
 
-Starting from the 8M governance burn lock (16M vePower):
+Starting from the 8M governance burn lock (16M vePower), and assuming treasury emissions are continuously recycled into burn locks during launch (`~1.15M SWITCH/week -> ~2.30M vePower/week` at a 10% treasury rate):
 
-| Time | Governance vePower | Max External vePower* | Governance Control |
-|------|-------------------|----------------------|-------------------|
-| Launch | 16,000,000 | 0 | 100% |
-| Week 1 | 16,000,000 | ~5,750,000 | ~74% |
-| Week 2 | 16,000,000 | ~11,500,000 | ~58% |
-| Month 1 | 16,000,000 | ~25,000,000 | ~39% |
+| Time from Emission Start | Treasury vePower (with Recycling) | Governance Control Range* |
+|------|-------------------------------|---------------------------|
+| Launch | 16,000,000 | 100% |
+| Week 1 | ~18,300,000 | ~77.9%-85.5% |
+| Week 2 | ~20,600,000 | ~66.6%-76.8% |
+| Month 1 (~30d) | ~25,900,000 | ~53.8%-66.0% |
+| Month 3 (~90d) | ~45,600,000 | ~40.7%-53.3% |
 
-*Assumes 50% of new SWITCH emissions are locked at maximum duration (2 years)*
+*Range assumes external max-duration lock participation between 50% and 30% of voter-side emissions. Real outcomes vary with lock behavior and early exits.*
 
-The permanent burn lock ensures the protocol treasury retains meaningful governance influence even as emissions distribute tokens to the broader community. By month 1, the treasury still holds ~39% control — sufficient to block hostile governance proposals while community governance becomes increasingly decentralized.
+The permanent burn lock, combined with treasury-side emission recycling, is designed to preserve strong governance influence through the launch window while participation decentralizes over time. If treasury vote share falls faster than expected, reserve-backed contingency burn-lock tranches can reinforce control without changing emission mechanics.
 
 ---
 
@@ -528,14 +529,25 @@ When a swap occurs in any pool:
 3. Fees are routed through the `ProtocolFeeManager` for processing
 4. Processed fees are deposited into the pool's `DripVotingReward` contract
 
-### 8.3 ProtocolFeeManager Buyback
+### 8.3 Automatic Fee Buybacks (Key Differentiator)
 
-The `ProtocolFeeManager` converts a portion of collected fees into SWITCH tokens before distributing them to voters.
+In every existing ve(3,3) implementation — Solidly, Velodrome, Aerodrome, Thena, and others — collected trading fees are passed through directly to voters as raw fee tokens (ETH, USDC, stablecoins, etc.). Voters receive whatever tokens the pool happened to generate. This creates no demand-side pressure on the governance token and means protocol revenue flows entirely out of the native token economy.
+
+**SwitchX fundamentally changes this.** The `ProtocolFeeManager` automatically converts a configurable portion of ALL collected trading fees into SWITCH tokens on the open market before distributing them to voters. At launch, 50% of every fee dollar is swapped to SWITCH; the remaining 50% passes through as the original fee token for diversification.
+
+**Why this matters:**
+
+- **Constant buy pressure.** Every swap on every pool generates SWITCH demand — not just during emissions, but permanently as long as the protocol has trading volume. This is structural demand that scales with protocol success.
+- **Revenue-to-governance alignment.** Voters earn SWITCH directly from protocol activity, reinforcing their governance stake rather than accumulating unrelated tokens.
+- **Supply compression.** When combined with burn locks (permanent supply destruction), auto-lock (50-90% of farming rewards locked), and early exit burns, the buyback creates sustained demand against a continuously declining circulating supply.
+- **Post-emission sustainability.** After the 2.5-year emission schedule ends, fee buybacks continue indefinitely — replacing emission-driven incentives with revenue-driven demand. No other ve(3,3) protocol has this mechanism.
 
 **Mechanism:**
-1. Raw fee tokens (e.g., DAI, WPLS) arrive at the ProtocolFeeManager
+1. Raw fee tokens (USDC, WPLS, DAI, etc.) arrive at the ProtocolFeeManager via the Voter contract
 2. The buyback percentage (`buybackBps = 5000`, i.e., 50%) determines how much to swap
-3. The manager executes a swap through the SwitchX router: `fee_token → SWITCH`
+3. The manager executes a swap through the SwitchX router using per-token swap paths:
+   - Direct paths for tokens with liquid SWITCH pools (e.g., `USDC → SWITCH`, `WPLS → SWITCH`)
+   - Multi-hop paths for tokens without direct SWITCH pools (e.g., `DAI → USDC → SWITCH`)
 4. The resulting SWITCH tokens are sent to voters alongside any passthrough (unconverted) fee tokens
 5. The remaining 50% passes through as the original fee token
 
@@ -552,7 +564,7 @@ If either check fails, the entire fee amount passes through without a swap — e
 
 **Graceful Fallback:**
 
-If the buyback swap reverts for any reason (insufficient liquidity, pool not initialized, etc.), the manager catches the error and falls back to full passthrough mode. Fees are never lost or stranded in the manager contract.
+If the buyback swap reverts for any reason (insufficient liquidity, pool not initialized, etc.), the manager catches the error and falls back to full passthrough mode. Fees are never lost or stranded in the manager contract. Any token without a configured swap path is also passed through safely.
 
 ### 8.4 DripVotingReward
 
@@ -590,14 +602,14 @@ After 10 periods, ~65% of the original fees have been distributed, with the rema
 
 ### 8.5 Staged Launch Emission Direction
 
-SwitchX launches with all four core gauges wired from day 1 (`SWITCH/DAI`, `SWITCH/WPLS`, `WPLS/DAI`, `USDC/DAI`), but emissions are directed in staged baselines rather than equal split:
+SwitchX launches with all four core gauges wired from day 1 (`SWITCH/USDC`, `SWITCH/WPLS`, `USDC/WPLS`, `USDC/DAI`), but emissions are directed in staged baselines rather than equal split:
 
 - **Epochs 1-2:** `50 / 20 / 25 / 5`
 - **Epochs 3-4:** `45 / 20 / 25 / 10`
 - **Epochs 5-8:** `40 / 20 / 25 / 15`
 - **Epochs 9-12:** `35 / 20 / 25 / 20`
 
-This policy prioritizes early SWITCH price discovery (`SWITCH/DAI`) while preserving routing depth (`WPLS/DAI`) and keeping stablecoin participation active (`USDC/DAI`) from launch. Weekly adjustments are bounded and KPI-driven to avoid over-correction, and bribe spend scales with treasury vote-share dilution over time.
+This policy prioritizes early SWITCH price discovery (`SWITCH/USDC`) while preserving routing depth (`USDC/WPLS`) and keeping stablecoin participation active (`USDC/DAI`) from launch. Weekly adjustments are bounded and KPI-driven to avoid over-correction, and bribe spend scales with treasury vote-share dilution over time.
 
 ---
 
@@ -626,8 +638,8 @@ The auto-lock system is SwitchX's mechanism for compounding governance alignment
    - **Locked rewards**: Earmarked for automatic veNFT locking
 
 2. The split is determined by the auto-lock percentage, which is configured per-pool with a tiered approach:
-   - **Native pools** (SWITCH/WPLS, SWITCH/DAI): **50%** auto-locked — balances governance compounding with farmer liquidity
-   - **Non-native pools** (WPLS/DAI): **75%** auto-locked — standard non-SWITCH pool, lighter friction for routing backbone
+   - **Native pools** (SWITCH/WPLS, SWITCH/USDC): **50%** auto-locked — balances governance compounding with farmer liquidity
+   - **Non-native pools** (USDC/WPLS): **75%** auto-locked — standard non-SWITCH pool, lighter friction for routing backbone
    - **Vampire pools** (USDC/DAI): **90%** auto-locked — maximum anti-mercenary protection; zero-IL stablecoin pair where farmers have no need for liquid SWITCH
    - **On-chain cap**: `MAX_AUTO_LOCK_PERCENTAGE = 9000` (90% maximum, enforced in `V4EternalFarming`)
    - **Per-pool override**: `autoLockConfigByPool[pool]` allows governance to adjust each pool independently
@@ -672,11 +684,18 @@ SwitchX implements an `afterSwap` hook-based MEV recapture system through the `M
    → Plugin calls executor.onAfterSwap(pool, recipient, zeroToOne, amount0, amount1)
 4. Executor evaluates arbitrage opportunity against PulseX
 5. If profitable, executor performs backrun trade:
-   → Borrows from SwitchX pool (internal swap at zero fee)
-   → Swaps on PulseX
-   → Returns borrowed amount + profit
+   → Selects cheapest borrow source: self-funded (0% fee) > V4 flash (0.01%) > PulseX pair (0.29%)
+   → Executes internal SwitchX swap (fee-exempt MEV path)
+   → Repays borrow via configured exact-output route (V1/V2 or StableSwap)
+   → Self-funded mode: buys back spent tokens from MEV output, restoring held balance
 6. Profit is distributed as ve(3,3) voting rewards
 ```
+
+**Route model:**
+- Repayment routes are explicit per token direction (`V1`, `V2`, `STABLE`, `MIXED`).
+- Stablecoin routes (e.g., USDC/DAI) use PulseX StableSwap for tighter repayment pricing.
+- Mixed routes support volatile + stable hop composition (for example `WPLS -> DAI -> USDC`), where stable hops are pinned to StableSwap pools and volatile hops dynamically select the cheaper PulseX V1/V2 pair at execution time.
+- Same-pool V4 flash is intentionally unsupported; cross-pool flash sources are configured per token.
 
 ### 10.3 Internal Swap Detection
 
@@ -713,8 +732,14 @@ The MEV executor is configured with PulseX factory addresses for both V1 and V2:
 | `PULSEX_FACTORY_V1` | `0x1715a3E4A142d8b698131108995174F37aEBA10D` |
 | `PULSEX_FACTORY_V2` | `0x29ea7545def87022badc76323f373ea1e707c523` |
 | `PULSEX_SWAP_ROUTER` | `0xDA9aBA4eACF54E0273f56dfFee6B8F1e20B23Bba` |
+| `PULSEX_STABLE_SWAP_THREE_POOL` | `0xE3acFA6C40d53C3faf2aa62D0a715C737071511c` |
 
-This allows the executor to evaluate and execute arbitrage against PulseX's on-chain liquidity in the same transaction as the user's swap.
+Operational defaults:
+- StableSwap repayment routes are enabled for USDC/DAI directions.
+- Mixed repayment routes are enabled for USDC/WPLS directions through DAI + StableSwap (`WPLS -> DAI -> USDC` and reverse).
+- V4 flash borrow path is guarded by a global kill-switch (`v4FlashBorrowEnabled`) and is enabled by default at launch.
+- `SecurityRegistry` flash status must be `ENABLED` for V4 flash borrowing.
+- **Self-funded mode** (`selfFundedEnabled`): When the executor contract holds token balances, it uses them directly instead of borrowing — eliminating the 0.01–0.29% borrow fee per arb. After the MEV swap, a buyback restores the spent tokens from the output. Failed arbs revert atomically (no loss of capital). Ships dark (disabled by default); activation sequence: fund executor → `setSelfFundedEnabled(true)` → monitor. Instant rollback: `setSelfFundedEnabled(false)` falls back to flash borrows.
 
 ---
 
@@ -906,7 +931,7 @@ Users should be aware of the following risks inherent to the SwitchX protocol an
 | **Lock Types** | Time-locked only | + Burn locks (permanent, 2x voting power) |
 | **Early Exit** | Not possible (wait for expiry) | Penalty-based with 3 curve options (10-100%) |
 | **Fee Distribution** | Immediate 100% per period | Drip-based (10%/period from pool) |
-| **Fee Processing** | Direct passthrough to voters | 50% SWITCH buyback + 50% passthrough |
+| **Fee Processing** | Direct passthrough to voters (no native token demand) | **50% automatic SWITCH buyback** + 50% passthrough — every swap generates native token demand |
 | **Farm Rewards** | 100% liquid | 50-90% auto-locked for 2 years (three tiers: native 50%, non-native 75%, vampire 90%) |
 | **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed |
 | **MEV Protection** | None; users vulnerable to sandwich attacks | Backrun fee surcharge makes sandwiches unprofitable |
@@ -1071,20 +1096,20 @@ if (tEffective == tEnd && emitted + budget < totalBudget) {
 
 This ensures the full budget is eventually distributed, with any rounding remainder allocated in the final period.
 
-### 14.4 Governance Power Decay Timeline
+### 14.4 Governance Power Timeline (Recycling-Aware)
 
-Assuming the 8M burn lock (16M permanent vePower) and that 50% of new emissions are locked at max duration:
+Assuming the 8M burn lock (16M permanent vePower), a 10% treasury emission share continuously recycled into burn locks (`~2.30M vePower/week`), and external max-duration lock participation between 30% and 50% of voter-side emissions:
 
-| Time | Cumulative Emissions | Assumed Locked (50%) | Max New vePower | Governance vePower | Governance % |
-|------|---------------------|---------------------|-----------------|-------------------|-------------|
-| Day 0 | 0 | 0 | 0 | 16,000,000 | 100% |
-| Week 1 | ~11,508,000 | ~5,754,000 | ~5,754,000 | 16,000,000 | ~74% |
-| Week 2 | ~23,016,000 | ~11,508,000 | ~11,508,000 | 16,000,000 | ~58% |
-| Month 1 | ~49,320,000 | ~24,660,000 | ~24,660,000 | 16,000,000 | ~39% |
-| Month 3 | ~147,960,000 | ~73,980,000 | ~73,980,000 | 16,000,000 | ~18% |
-| Month 6 | ~295,920,000 | ~147,960,000 | ~147,960,000* | 16,000,000 | ~10%* |
+| Time from Emission Start | Treasury vePower | External vePower @30% Lock | Governance % @30% Lock | External vePower @50% Lock | Governance % @50% Lock |
+|------|------------------|-----------------------------|------------------------|-----------------------------|------------------------|
+| Day 0 | 16,000,000 | 0 | 100.0% | 0 | 100.0% |
+| Week 1 | ~18,300,000 | ~3,100,000 | ~85.5% | ~5,200,000 | ~77.9% |
+| Week 2 | ~20,600,000 | ~6,200,000 | ~76.8% | ~10,400,000 | ~66.6% |
+| Month 1 (~30d) | ~25,900,000 | ~13,300,000 | ~66.0% | ~22,200,000 | ~53.8% |
+| Month 3 (~90d) | ~45,600,000 | ~39,900,000 | ~53.3% | ~66,600,000 | ~40.7% |
+| Month 6 (~180d) | ~75,200,000 | ~79,900,000 | ~48.5% | ~133,200,000 | ~36.1% |
 
-*Note: External vePower starts decaying for earlier locks, so actual governance share will be higher than this simplified model suggests. Burn locks by other participants would further redistribute power.*
+*This is still a simplified upper-bound model for external control. Real outcomes are typically more favorable to treasury control because lock behavior is heterogeneous, some positions early-exit, and governance alignment is not purely adversarial across the four launch gauges.*
 
 ### 14.5 Supply Contraction Dynamics
 
