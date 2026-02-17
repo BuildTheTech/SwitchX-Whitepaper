@@ -52,7 +52,9 @@ However, these protocols share several structural weaknesses:
 
 ### 2.2 The SwitchX Protocol Thesis
 
-SwitchX addresses these problems through a coordinated set of mechanisms:
+The core structural insight behind SwitchX is that ve(3,3) tokenomics work better when supply is finite and actively contracting. Every existing ve(3,3) protocol — Solidly, Velodrome, Aerodrome, Thena, Equalizer — relies on perpetual inflation with no supply cap. Their governance locks dilute over time (Velodrome's launch locks have fallen from 34% to ~7% as supply 5x'd), requiring anti-dilution rebases that only partially offset the damage. SwitchX eliminates this entirely: a hard-capped supply with a definitive emission end date means governance power strengthens over time rather than weakening, and token holders are never diluted by new issuance.
+
+SwitchX addresses the structural weaknesses of existing ve(3,3) protocols through a coordinated set of mechanisms:
 
 1. **Fixed supply with terminal emissions.** A hard cap of 1 billion SWITCH tokens with all emissions completing within 2.5 years. After that, no new tokens are ever minted.
 
@@ -322,24 +324,24 @@ For launch, limit-order hooks are disabled on ALM launch pools to prioritize swa
 | Parameter | Value |
 |-----------|-------|
 | **Hard Cap** | 1,000,000,000 SWITCH |
-| **Premint** | 23,000,000 SWITCH (2.3% of cap) |
-| **Emission Budget** | 977,000,000 SWITCH (97.7% of cap) |
+| **Premint** | 30,000,000 SWITCH (3.0% of cap) |
+| **Emission Budget** | 970,000,000 SWITCH (97.0% of cap) |
 | **Emission Duration** | 2.5 years |
 
 The SWITCH token has a **hard cap** enforced at the smart contract level. No more than 1 billion tokens can ever exist. This stands in contrast to standard ve(3,3) implementations where emissions continue indefinitely.
 
 ### 6.2 Premint Allocation
 
-The 23M premint is allocated as follows:
+The 30M premint is allocated as follows:
 
 | Allocation | Amount | % of Premint | Purpose |
 |-----------|--------|-------------|---------|
-| Governance Burn Lock | 8,000,000 | 34.8% | Permanent 2x voting power (16M vePower) |
-| Liquidity Bootstrapping | 12,000,000 | 52.2% | Initial pool liquidity (SWITCH/USDC, SWITCH/WPLS) |
-| Bribe Budget | 2,000,000 | 8.7% | Epochs 1-12 voting incentives |
-| Operational Buffer | 1,000,000 | 4.3% | Team locks, gas, contingencies |
+| Governance Burn Lock | 15,000,000 | 50.0% | Permanent 2x voting power (30M vePower) |
+| Liquidity Bootstrapping | 12,000,000 | 40.0% | Initial pool liquidity (SWITCH/USDC, SWITCH/WPLS) |
+| Bribe Budget | 2,000,000 | 6.7% | Epochs 1-12 voting incentives |
+| Operational Buffer | 1,000,000 | 3.3% | Team locks, gas, contingencies |
 
-The 8M burn lock creates an initial governance position with 16M vePower (via the 2x burn multiplier), giving the protocol treasury effectively 100% voting control at launch (before external locks exist) and strong defensive capacity during the bootstrapping phase.
+The 15M burn lock creates an initial governance position with 30M vePower (via the 2x burn multiplier), giving the protocol treasury effectively 100% voting control at launch (before external locks exist) and maintaining majority governance through the first month even without treasury emission recycling. This larger initial lock provides the operational flexibility to allocate treasury emissions toward growth, partnerships, and liquidity rather than requiring continuous governance reinforcement.
 
 ### 6.3 Emission Schedule
 
@@ -347,10 +349,10 @@ Emissions follow a three-phase halving schedule over 2.5 years:
 
 | Phase | Duration | Rate | Daily Emissions | Total Emitted |
 |-------|----------|------|-----------------|---------------|
-| Year 1 | 12 months | Base rate | ~1,644,000 SWITCH/day | ~600,060,000 |
-| Year 2 | 12 months | Half rate | ~822,000 SWITCH/day | ~300,030,000 |
-| Year 2.5 | 6 months | Quarter rate | ~411,000 SWITCH/day | ~75,007,500 |
-| **Total** | **2.5 years** | — | — | **~977,000,000** |
+| Year 1 | 12 months | Base rate | ~1,635,000 SWITCH/day | ~596,923,077 |
+| Year 2 | 12 months | Half rate | ~818,000 SWITCH/day | ~298,461,538 |
+| Year 2.5 | 6 months | Quarter rate | ~409,000 SWITCH/day | ~74,615,385 |
+| **Total** | **2.5 years** | — | — | **~970,000,000** |
 
 **After 2.5 years, emissions stop permanently.** No tail emissions, no governance vote to extend them. The emission budget is fully consumed and the token supply is fixed forever.
 
@@ -372,11 +374,18 @@ Year 2.5: (base/4) × (YEAR/2)       = budget × 1/13
 Total:                               = budget × 13/13 = budget
 ```
 
-This produces a base rate of approximately 19.03 SWITCH per second (≈1,644,000/day).
+This produces a base rate of approximately 18.93 SWITCH per second (≈1,635,000/day).
 
 ### 6.5 Treasury Allocation
 
-**10%** of all emissions (`TREASURY_RATE = 1000`) are directed to the protocol treasury to maintain governance power in the early days & prevent hostile takeover. This will be scaled down over time as the protocol matures. The remaining 90% flows to the Voter contract for distribution to gauges based on veNFT votes.
+**10%** of all emissions (`TREASURY_RATE = 1000`) are directed to the protocol treasury. This allocation serves as a flexible operational reserve that the protocol can deploy across multiple priorities as conditions demand:
+
+- **Governance reinforcement** — burn-locking into veNFTs to maintain voting power during the critical launch window
+- **Ecosystem growth** — strategic partnerships, grants, and integrations
+- **Liquidity bootstrapping** — targeted incentives for priority pools or pairs
+- **Operational sustainability** — protocol development and maintenance costs
+
+The exact allocation mix is determined by protocol governance and can shift over time as priorities evolve. During early launch, a larger share may be directed toward governance power (burn locks) to prevent hostile takeover; as the protocol matures and decentralizes, the balance may shift toward growth and operational needs. The `TREASURY_RATE` itself can be scaled down over time (capped at 10% max on-chain). The remaining 90% flows to the Voter contract for distribution to gauges based on veNFT votes.
 
 ### 6.6 Why Fixed Supply Matters
 
@@ -491,19 +500,19 @@ The penalty ranges from 10% (near expiry) to 100% (just after locking). The pena
 
 ### 7.5 Governance Power Timeline
 
-Starting from the 8M governance burn lock (16M vePower), and assuming treasury emissions are continuously recycled into burn locks during launch (`~1.15M SWITCH/week -> ~2.30M vePower/week` at a 10% treasury rate):
+Starting from the 15M governance burn lock (30M vePower), the table below illustrates governance power under a **maximum recycling scenario** where all treasury emissions are burn-locked (`~1.14M SWITCH/week -> ~2.29M vePower/week` at a 10% treasury rate). In practice, only a portion of treasury emissions may be directed to burn locks, with the remainder allocated to growth, operations, or liquidity (see Section 6.5).
 
-| Time from Emission Start | Treasury vePower (with Recycling) | Governance Control Range* |
+| Time from Emission Start | Treasury vePower (max recycling) | Governance Control Range* |
 |------|-------------------------------|---------------------------|
-| Launch | 16,000,000 | 100% |
-| Week 1 | ~18,300,000 | ~77.9%-85.5% |
-| Week 2 | ~20,600,000 | ~66.6%-76.8% |
-| Month 1 (~30d) | ~25,900,000 | ~53.8%-66.0% |
-| Month 3 (~90d) | ~45,600,000 | ~40.7%-53.3% |
+| Launch | 30,000,000 | 100% |
+| Week 1 | ~32,300,000 | ~86.2%-91.3% |
+| Week 2 | ~34,600,000 | ~77.0%-84.8% |
+| Month 1 (~30d) | ~39,800,000 | ~64.3%-75.0% |
+| Month 3 (~90d) | ~59,500,000 | ~47.3%-59.9% |
 
-*Range assumes external max-duration lock participation between 50% and 30% of voter-side emissions. Real outcomes vary with lock behavior and early exits.*
+*Range assumes external max-duration lock participation between 50% and 30% of voter-side emissions. Actual governance power will be lower if treasury emissions are partially allocated to non-lock purposes. Real outcomes vary with lock behavior and early exits.*
 
-The permanent burn lock, combined with treasury-side emission recycling, is designed to preserve strong governance influence through the launch window while participation decentralizes over time. If treasury vote share falls faster than expected, reserve-backed contingency burn-lock tranches can reinforce control without changing emission mechanics.
+The larger 15M burn lock (vs the previous 8M) establishes a strong governance floor that maintains majority control through the first month even without any treasury emission recycling. This provides operational flexibility to allocate treasury emissions toward growth, partnerships, and liquidity rather than requiring continuous governance reinforcement. If treasury vote share falls faster than expected, reserve-backed contingency burn-lock tranches can reinforce control without changing emission mechanics.
 
 ---
 
@@ -551,16 +560,16 @@ In every existing ve(3,3) implementation — Solidly, Velodrome, Aerodrome, Then
 4. The resulting SWITCH tokens are sent to voters alongside any passthrough (unconverted) fee tokens
 5. The remaining 50% passes through as the original fee token
 
-**Oracle Slippage Protection:**
+**Oracle Slippage Protection (Enabled by Default):**
 
-Before executing any buyback swap, the manager checks oracle-based slippage guards:
+Because `distributeAll()` is permissionless and fee buyback swaps accumulate weekly per pool, they are a natural target for sandwich MEV attacks. To prevent this, the manager checks TWAP-based oracle slippage guards before every buyback swap:
 
-| Check | Parameter | Purpose |
-|-------|-----------|---------|
-| Short-term | `shortTermMaxTick` | Detects recent price manipulation |
-| Long-term | `longTermMaxTick` + `longTermSecondsAgo` | Detects sustained price deviation |
+| Check | Default | Purpose |
+|-------|---------|---------|
+| Short-term | 100 ticks (~1%) since block start | Detects intra-block sandwich frontrun manipulation |
+| Long-term | 500 ticks (~5%) over 1800s (30 min) TWAP | Detects sustained price deviation or multi-block manipulation |
 
-If either check fails, the entire fee amount passes through without a swap — ensuring voters always receive their rewards even when market conditions make buybacks inadvisable.
+If either check fails — or if slippage protection has not been configured — the entire fee amount passes through without a swap. The contract is **fail-closed by default**: unconfigured slippage protection results in passthrough (safe), never unprotected swaps (exploitable). This ensures voters always receive their rewards even when market conditions make buybacks inadvisable. Protection is enabled by default at deployment and covers the full swap path including multi-hop routes.
 
 **Graceful Fallback:**
 
@@ -923,25 +932,46 @@ Users should be aware of the following risks inherent to the SwitchX protocol an
 
 ## 13. What Sets SwitchX Apart
 
-### 13.1 Comparison Table
+### 13.1 The Fundamental Difference: Fixed Supply vs. Perpetual Inflation
+
+Every major ve(3,3) protocol to date — Solidly, Velodrome, Aerodrome, Thena, Equalizer — shares a common structural weakness: **perpetual token inflation with no supply cap.** Governance locks in these systems are a treadmill — high initial percentages that dilute indefinitely as supply expands.
+
+Consider the reality:
+
+| Protocol | Gov Lock at Launch | Supply Model | Gov Lock Today |
+|----------|-------------------|-------------|---------------|
+| Velodrome | 34% of 400M | No cap (1.92B+ now) | ~7% (supply 5x'd) |
+| Aerodrome | 90% of 500M | No cap (1.82B+ now) | ~25% (supply 3.6x'd) |
+| Solidly | ~25% of 100M | Asymptotic (never ends) | Diluted continuously |
+| **SwitchX** | **1.5% of 1B** | **Hard cap, emissions END at 2.5 years** | **Grows over time (supply contracts)** |
+
+SwitchX inverts this dynamic entirely. Because supply is hard-capped and actively contracts through burn mechanisms, governance power **strengthens** over time rather than diluting. The 15M burn lock (1.5% of max supply) is permanently removed from circulation — and as early exit penalties burn additional tokens, the burn lock's share of remaining supply increases.
+
+This is why SwitchX does not need anti-dilution rebases (which every other ve(3,3) protocol requires). There is no perpetual dilution to protect against. The system is designed so that doing nothing — simply holding a burn lock — makes you relatively stronger over time, not weaker.
+
+### 13.2 Feature Comparison
 
 | Feature | Standard ve(3,3) | SwitchX |
 |---------|-----------------|--------|
-| **Token Supply** | Perpetual tail emissions | Hard cap (1B), 2.5-year schedule, then zero |
-| **Lock Types** | Time-locked only | + Burn locks (permanent, 2x voting power) |
-| **Early Exit** | Not possible (wait for expiry) | Penalty-based with 3 curve options (10-100%) |
-| **Fee Distribution** | Immediate 100% per period | Drip-based (10%/period from pool) |
+| **Token Supply** | Perpetual tail emissions (no end date) | Hard cap (1B), 2.5-year schedule, then **zero new tokens forever** |
+| **Supply Trajectory** | Perpetually expanding (requires rebases to offset dilution) | **Actively contracting** (burn locks + early exit burns reduce totalSupply) |
+| **Anti-dilution Rebase** | Required (without it, governance power decays indefinitely) | **Not needed** (fixed supply = no dilution to protect against) |
+| **Lock Types** | Time-locked only (decaying power) | + Burn locks (permanent, irrevocable, 2x voting power) |
+| **Burn Lock Permanence** | Convertible back to decaying lock (Velodrome/Aerodrome) | **Truly irrevocable** — tokens are burned via `ERC20.burn()`, reducing totalSupply |
+| **Early Exit** | Not possible (must wait for expiry) | Penalty-based with 3 curve options (10-100%) |
+| **Early Exit Burns** | N/A | **50% of penalty permanently burned** (true supply reduction), 50% to voters |
 | **Fee Processing** | Direct passthrough to voters (no native token demand) | **50% automatic SWITCH buyback** + 50% passthrough — every swap generates native token demand |
-| **Farm Rewards** | 100% liquid | 50-90% auto-locked for 2 years (three tiers: native 50%, non-native 75%, vampire 90%) |
-| **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed |
+| **Fee Distribution** | Immediate 100% per period | Drip-based (10%/period from pool) — smooths volatility |
+| **Farm Rewards** | 100% liquid (immediate sell pressure) | 50-90% auto-locked for 2 years (three tiers: native 50%, non-native 75%, vampire 90%) |
+| **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed to voters |
 | **MEV Protection** | None; users vulnerable to sandwich attacks | Backrun fee surcharge makes sandwiches unprofitable |
 | **LVR Protection** | None; arb bots extract LP value at standard fees | Cross-DEX oracle fee captures LVR from corrective arb swaps |
 | **Community Fee** | Varies (typically 100% to voters) | 75% to voters, 25% to LPs — balances flywheel strength with ALM vault returns |
 | **Swap Fees** | Static fee tiers | Tiered volatility-adaptive fees (0.2%–0.3% base) + MEV surcharge + LVR surcharge |
 | **Liquidity Management** | Manual positions | Automated ALM vaults with TWAP rebalancing |
-| **Exit Penalty Distribution** | N/A | 50% burned, 50% to voters |
+| **Post-Emission Sustainability** | Depends on perpetual inflation continuing | Fee-funded buybacks, community farming top-ups, zero inflation |
 
-### 13.2 The SwitchX Flywheel
+### 13.3 The SwitchX Flywheel
 
 These mechanisms combine into a self-reinforcing economic flywheel:
 
@@ -997,7 +1027,7 @@ Each mechanism reinforces the others:
 - **Adaptive fees** optimize revenue capture across market conditions
 - **ALM vaults** maximize capital efficiency and fee generation
 
-### 13.3 Terminal Emissions: The Endgame
+### 13.4 Terminal Emissions: The Endgame
 
 After 2.5 years, SWITCH reaches a fundamentally different equilibrium than any perpetual-emission protocol:
 
@@ -1008,7 +1038,7 @@ After 2.5 years, SWITCH reaches a fundamentally different equilibrium than any p
 
 This creates a protocol where long-term holders benefit from a progressively favorable supply/demand dynamic, without relying on continuous growth to offset dilution.
 
-### 13.4 Post-Emission Sustainability (Year 3+)
+### 13.5 Post-Emission Sustainability (Year 3+)
 
 A common objection to fixed-supply tokenomics is: "What happens when emissions end? Won't LPs leave?"
 
@@ -1035,21 +1065,21 @@ The key insight is that emissions are a bootstrapping mechanism, not a permanent
 | Metric | Value |
 |--------|-------|
 | Total Cap | 1,000,000,000 SWITCH |
-| Premint | 23,000,000 SWITCH (2.3%) |
-| Emission Budget | 977,000,000 SWITCH (97.7%) |
-| Year 1 Rate | ~19.03 SWITCH/second |
-| Year 1 Daily | ~1,644,000 SWITCH/day |
-| Year 2 Rate | ~9.52 SWITCH/second |
-| Year 2 Daily | ~822,000 SWITCH/day |
-| Year 2.5 Rate | ~4.76 SWITCH/second |
-| Year 2.5 Daily | ~411,000 SWITCH/day |
+| Premint | 30,000,000 SWITCH (3.0%) |
+| Emission Budget | 970,000,000 SWITCH (97.0%) |
+| Year 1 Rate | ~18.93 SWITCH/second |
+| Year 1 Daily | ~1,635,000 SWITCH/day |
+| Year 2 Rate | ~9.46 SWITCH/second |
+| Year 2 Daily | ~818,000 SWITCH/day |
+| Year 2.5 Rate | ~4.73 SWITCH/second |
+| Year 2.5 Daily | ~409,000 SWITCH/day |
 | Emission Duration | 2.5 years (912.5 days) |
 | Treasury Share | 10% of all emissions |
 
 ### 14.2 Base Rate Derivation
 
 Given:
-- Total budget `B = 977,000,000 × 10¹⁸` (in token units)
+- Total budget `B = 970,000,000 × 10¹⁸` (in token units)
 - Year 1 emits at rate `r` for `Y` seconds
 - Year 2 emits at rate `r/2` for `Y` seconds
 - Year 2.5 emits at rate `r/4` for `Y/2` seconds
@@ -1068,8 +1098,8 @@ Solving for `r`:
 
 ```
 r = (B × 8) / (13 × Y)
-r = (977,000,000 × 8) / (13 × 31,536,000)
-r ≈ 19.0335 SWITCH/second
+r = (970,000,000 × 8) / (13 × 31,536,000)
+r ≈ 18.9283 SWITCH/second
 ```
 
 This matches the on-chain implementation:
@@ -1081,12 +1111,12 @@ baseRatePerSecond = (totalBudget * 8) / (13 * YEAR);
 
 | Phase | Calculation | SWITCH Emitted |
 |-------|-------------|----------------|
-| Year 1 | 19.0335 × 31,536,000 | ~600,307,692 |
-| Year 2 | 9.5168 × 31,536,000 | ~300,153,846 |
-| Year 2.5 | 4.7584 × 15,768,000 | ~75,038,462 |
-| **Sum** | | **~975,500,000** |
+| Year 1 | 18.9283 × 31,536,000 | ~596,923,077 |
+| Year 2 | 9.4642 × 31,536,000 | ~298,461,538 |
+| Year 2.5 | 4.7321 × 15,768,000 | ~74,615,385 |
+| **Sum** | | **~970,000,000** |
 
-The small difference from 977M is due to integer rounding in the per-second rate. The Minter contract handles this with an end-of-schedule cleanup:
+The small difference from 970M is due to integer rounding in the per-second rate. The Minter contract handles this with an end-of-schedule cleanup:
 
 ```solidity
 if (tEffective == tEnd && emitted + budget < totalBudget) {
@@ -1096,20 +1126,20 @@ if (tEffective == tEnd && emitted + budget < totalBudget) {
 
 This ensures the full budget is eventually distributed, with any rounding remainder allocated in the final period.
 
-### 14.4 Governance Power Timeline (Recycling-Aware)
+### 14.4 Governance Power Timeline (Maximum Recycling Scenario)
 
-Assuming the 8M burn lock (16M permanent vePower), a 10% treasury emission share continuously recycled into burn locks (`~2.30M vePower/week`), and external max-duration lock participation between 30% and 50% of voter-side emissions:
+The table below models the **upper bound** of governance power assuming the 15M burn lock (30M permanent vePower) and 100% of treasury emissions continuously recycled into burn locks (`~2.29M vePower/week`). In practice, treasury emissions are allocated flexibly across governance, growth, operations, and liquidity (see Section 6.5), so actual governance power from treasury will be lower than shown.
 
-| Time from Emission Start | Treasury vePower | External vePower @30% Lock | Governance % @30% Lock | External vePower @50% Lock | Governance % @50% Lock |
+| Time from Emission Start | Treasury vePower (max recycling) | External vePower @30% Lock | Governance % @30% Lock | External vePower @50% Lock | Governance % @50% Lock |
 |------|------------------|-----------------------------|------------------------|-----------------------------|------------------------|
-| Day 0 | 16,000,000 | 0 | 100.0% | 0 | 100.0% |
-| Week 1 | ~18,300,000 | ~3,100,000 | ~85.5% | ~5,200,000 | ~77.9% |
-| Week 2 | ~20,600,000 | ~6,200,000 | ~76.8% | ~10,400,000 | ~66.6% |
-| Month 1 (~30d) | ~25,900,000 | ~13,300,000 | ~66.0% | ~22,200,000 | ~53.8% |
-| Month 3 (~90d) | ~45,600,000 | ~39,900,000 | ~53.3% | ~66,600,000 | ~40.7% |
-| Month 6 (~180d) | ~75,200,000 | ~79,900,000 | ~48.5% | ~133,200,000 | ~36.1% |
+| Day 0 | 30,000,000 | 0 | 100.0% | 0 | 100.0% |
+| Week 1 | ~32,300,000 | ~3,100,000 | 91.3% | ~5,200,000 | 86.2% |
+| Week 2 | ~34,600,000 | ~6,200,000 | 84.8% | ~10,300,000 | 77.0% |
+| Month 1 (~30d) | ~39,800,000 | ~13,300,000 | 75.0% | ~22,200,000 | 64.3% |
+| Month 3 (~90d) | ~59,500,000 | ~39,900,000 | 59.9% | ~66,500,000 | 47.3% |
+| Month 6 (~180d) | ~88,800,000 | ~79,400,000 | 52.8% | ~132,400,000 | 40.2% |
 
-*This is still a simplified upper-bound model for external control. Real outcomes are typically more favorable to treasury control because lock behavior is heterogeneous, some positions early-exit, and governance alignment is not purely adversarial across the four launch gauges.*
+*This is an upper-bound model. Actual treasury governance power will be lower since not all emissions are lock-recycled. Real outcomes are typically more favorable to treasury control because lock behavior is heterogeneous, some positions early-exit, and governance alignment is not purely adversarial across the four launch gauges.*
 
 ### 14.5 Supply Contraction Dynamics
 
@@ -1154,7 +1184,7 @@ The result is a deflationary token with increasing scarcity over time — the op
 | Parameter | Value | Source |
 |-----------|-------|--------|
 | SWITCH_MAX_SUPPLY | 1,000,000,000 | `scripts/deployAll.js` |
-| SWITCH_PREMINT | 23,000,000 | `src/voting/scripts/deploy.js` |
+| SWITCH_PREMINT | 30,000,000 | `src/voting/scripts/deploy.js` |
 | MAXTIME | 2 years (730 days) | `VotingEscrow.sol:31` |
 | burnMultiplierBps | 20,000 (2x) | `VotingEscrow.sol:103` |
 | maxEarlyExitFeeBps | 10,000 (100%) | `VotingEscrow.sol:104` |
