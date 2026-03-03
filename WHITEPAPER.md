@@ -1,6 +1,6 @@
 # SwitchX Protocol Whitepaper
 
-**Version 1.0 — February 2026**
+**Version 1.0 — March 2026**
 
 ---
 
@@ -66,7 +66,7 @@ SwitchX addresses the structural weaknesses of existing ve(3,3) protocols throug
 
 5. **Drip-based reward smoothing.** Rather than distributing all fees immediately, rewards are pooled and released at a configurable rate per period, reducing volatility and extending reward duration.
 
-6. **MEV recapture.** An integrated afterSwap hook system detects arbitrage opportunities and executes backrun trades, returning the profit to ve(3,3) voters.
+6. **MEV recapture.** An integrated afterSwap hook system detects arbitrage opportunities and executes backrun trades, returning the profit to ve(3,3) voters & protocol treasury.
 
 7. **Adaptive fees.** Volatility-responsive fee curves, same-block MEV surcharges, and cross-DEX oracle-based LVR fees ensure the protocol captures fair value across all market conditions.
 
@@ -338,8 +338,12 @@ The 30M premint is allocated as follows:
 |-----------|--------|-------------|---------|
 | Governance Burn Lock | 15,000,000 | 50.0% | Permanent 2x voting power (30M vePower) |
 | Liquidity Bootstrapping | 12,000,000 | 40.0% | Initial pool liquidity (SWITCH/USDC, SWITCH/WPLS) |
-| Bribe Budget | 2,000,000 | 6.7% | Epochs 1-12 voting incentives |
+| Bribe Budget | 2,000,000 | 6.7% | Launch bribes + future partner matching reserve |
 | Operational Buffer | 1,000,000 | 3.3% | Team locks, gas, contingencies |
+
+The 2M SWITCH bribe budget is a **premint reserve** (not additional minting). It is intended as a shared pool for early protocol-funded launch bribes (signaling / bootstrap incentives) and later external partner bribe matching as the ecosystem develops. Governance may keep part of this reserve ring-fenced to preserve future matching capacity.
+
+SwitchX also intentionally avoids a fixed, pre-defined **liquid team allocation tranche** at launch. Instead of reserving a large immediately-transferable team bucket as a hard percentage of premint, the design uses a smaller operational buffer (1M SWITCH) plus future treasury emissions as a flexible source for team locks, contributors, integrations, and contingencies as governance priorities evolve. This reduces guaranteed liquid overhang at launch while preserving operational flexibility.
 
 The 15M burn lock creates an initial governance position with 30M vePower (via the 2x burn multiplier), giving the protocol treasury effectively 100% voting control at launch (before external locks exist) and maintaining majority governance through the first month even without treasury emission recycling. This larger initial lock provides the operational flexibility to allocate treasury emissions toward growth, partnerships, and liquidity rather than requiring continuous governance reinforcement.
 
@@ -533,7 +537,7 @@ This creates the ve(3,3) alignment: voters are incentivized to direct emissions 
 ### 8.2 Community Fee Collection
 
 When a swap occurs in any pool:
-1. The community fee percentage (75%) of the swap fee is collected by `V4CommunityVault`
+1. The community fee percentage (75%) of the swap fee is collected by `V4CommunityVault` (7% of the fee goes to the treasury)
 2. The Voter contract claims these fees during the `distribute()` call
 3. Fees are routed through the `ProtocolFeeManager` for processing
 4. Processed fees are deposited into the pool's `DripVotingReward` contract
@@ -620,6 +624,28 @@ SwitchX launches with all four core gauges wired from day 1 (`SWITCH/USDC`, `SWI
 
 This policy prioritizes early SWITCH price discovery (`SWITCH/USDC`) while preserving routing depth (`USDC/WPLS`) and keeping stablecoin participation active (`USDC/DAI`) from launch. Weekly adjustments are bounded and KPI-driven to avoid over-correction, and bribe spend scales with treasury vote-share dilution over time.
 
+### 8.6 Treasury-Aware Bribe Budgeting
+
+SwitchX uses a treasury-aware bribe policy to improve long-term capital efficiency. Bribe budgets are phase-based ceilings, then scaled by treasury vote share so spend increases as external voting power becomes more meaningful.
+
+- **Phase budget ceilings:**
+  - **Epochs 1-4:** `200,000 SWITCH/week`
+  - **Epochs 5-8:** `150,000 SWITCH/week`
+  - **Epochs 9+:** `100,000 SWITCH/week`
+- **Treasury-share multiplier:**
+  - **Treasury share >= 70%:** `0.25x`
+  - **Treasury share >= 50% and < 70%:** `0.60x`
+  - **Treasury share < 50%:** `1.00x`
+- **Effective budget rule:** `effectiveBudget = min(phaseBudget, max(minFloor, phaseBudget * multiplier))`
+
+At launch, treasury-controlled vePower is expected to dominate, so protocol-funded bribes primarily serve as signaling / bootstrap incentives rather than vote-control tools. As external ve participation increases, the same framework naturally deploys more budget when bribes have higher marginal impact.
+
+Bribes are funded from treasury-controlled SWITCH reserves (primarily the premint bribe allocation, and optionally treasury-emission receipts if governance chooses). They are additive to normal emissions and should be managed conservatively early because direct bribes target the next period immediately (they are not drip-smoothed like fee rewards).
+
+During a treasury-dominant genesis phase, governance may temporarily set protocol-funded bribes to zero and rely on emissions-only LP incentives, preserving the bribe reserve for later external voter competition and partner matching when marginal bribe ROI is higher. This is an intended (and often preferable) launch posture when external bribers and non-treasury ve voters are not yet active. A conservative default policy can keep protocol-funded bribes at zero until treasury vote share falls below a defined activation threshold (e.g., 70%), after which treasury-aware scaling resumes automatically unless governance sets an explicit override.
+
+Bribe allocation across pools can use deficit-aware targeting relative to vote-weight baselines, with concentration caps and bounded weekly shifts. Governance retains override authority for exceptional market conditions.
+
 ---
 
 ## 9. Farming & Auto-Lock Mechanism
@@ -634,7 +660,7 @@ Each pool can have one active incentive at a time, consisting of:
 - A **virtual pool** that tracks reward accrual using the same tick math as the underlying AMM
 - A **minimum position width** requirement to prevent gaming via dust positions
 
-Positions are automatically enrolled in farming when minted through the FarmingCenter under an active incentive.
+Positions are automatically enrolled in farming when minted through the FarmingCenter under an active incentive. The farming system is open to external projects — any holder of the `INCENTIVE_MAKER_ROLE` can create and manage their own farming programs with custom reward tokens on any SwitchX pool. Anyone can add additional rewards to active programs. See [`docs/farming-guide.md`](docs/farming-guide.md) for the complete guide. A frontend Farming Admin Panel is coming soon.
 
 ### 9.2 Auto-Lock Mechanism
 
@@ -652,7 +678,7 @@ The auto-lock system is SwitchX's mechanism for compounding governance alignment
    - **Vampire pools** (USDC/DAI): **90%** auto-locked — maximum anti-mercenary protection; zero-IL stablecoin pair where farmers have no need for liquid SWITCH
    - **On-chain cap**: `MAX_AUTO_LOCK_PERCENTAGE = 9000` (90% maximum, enforced in `V4EternalFarming`)
    - **Per-pool override**: `autoLockConfigByPool[pool]` allows governance to adjust each pool independently
-   - **Default fallback**: `defaultAutoLockPercentage` applies to pools without explicit configuration
+   - **Default fallback**: `defaultAutoLockPercentage` applies to pools without explicit configuration (launch deployment initializes this to **50%** as a safety baseline; per-pool overrides remain authoritative)
 
 3. When the user claims locked rewards:
    - If `immediateLockOnClaim` is enabled (default: true), the contract attempts to create a veNFT immediately via `create_lock_for(amount, MAXTIME, recipient)`
@@ -727,10 +753,12 @@ The MEV recapture system and the cross-DEX oracle fee (Section 5.3) work togethe
 
 ### 10.4 Profit Distribution
 
-Profits from MEV recapture are distributed as ve(3,3) voting rewards, flowing through the same DripVotingReward system as regular trading fees. This means:
-- MEV profits are smoothed over time (drip mechanism)
-- Voters who direct emissions to MEV-active pools earn more
-- The protocol captures value that would otherwise leave the ecosystem
+Profits from MEV recapture are distributed as ve(3,3) voting rewards, flowing through the same DripVotingReward system as regular trading fees.
+
+Key Characteristics:
+- MEV profits are smoothed over time (same drip mechanism as regular trading fees)
+- Voters who direct emissions to MEV-active pools earn more as opposeed to traditional ve(3,3) that allow external actors to capture the MEV profits.
+- The protocol captures value that would otherwise leave the ecosystem. A dynamic portion of the profits are distributed to the protocol treasury to mitigate the need for token sales.
 
 ### 10.5 PulseX Integration
 
@@ -776,6 +804,12 @@ Each vault is configured with `allowToken0` and `allowToken1` flags. In a typica
 - Vault 2 accepts token1-denominated deposits (`allowToken1 = true`)
 
 This simplifies the user experience — depositors provide a single asset, and the vault handles the rest.
+
+**Automated Compounding:**
+
+- After share mint on deposit, vaults execute a best-effort `increaseLiquidity` compounding pass (base position first, then limit with remaining idle balances).
+- Managers can also trigger manual best-effort idle compounding through a role-gated vault function.
+- Compounding is non-blocking by design: if the add-liquidity path fails, the deposit still succeeds and funds remain idle until the next rebalance/compound attempt.
 
 ### 11.2 HybridRebalanceManager
 
@@ -894,7 +928,7 @@ Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH toke
 - **SafeERC20**: All token transfers use OpenZeppelin's SafeERC20 to handle non-standard ERC20 implementations
 - **Overflow protection**: Solidity 0.8.x built-in overflow checks, supplemented by SafeCast for critical conversions
 - **DripVotingReward DoS protection**: Catch-up is capped at 52 periods per call to prevent unbounded gas consumption
-- **Minimum shares**: ALM vaults enforce a minimum share amount (1000 wei) to prevent share inflation attacks
+- **Minimum shares + deterministic bootstrap**: ALM vaults enforce a minimum share amount (`MIN_SHARES = 1000`) and launch scripts bootstrap any empty vault with a minimal initial deposit to close first-deposit inflation/donation windows before public flow
 
 ### 12.7 Governance Decentralization Roadmap
 
@@ -1022,7 +1056,7 @@ Each mechanism reinforces the others:
 - **Fee buybacks** create consistent SWITCH demand from protocol revenue
 - **Early exit burns** remove tokens while rewarding committed voters
 - **Drip rewards** smooth volatility, making governance yields more predictable
-- **MEV recapture** returns leaked value to voters
+- **MEV recapture** returns leaked value to voters & protocol treasury
 - **LVR protection** ensures cross-DEX arbitrage profits are shared with LPs
 - **Adaptive fees** optimize revenue capture across market conditions
 - **ALM vaults** maximize capital efficiency and fee generation
@@ -1195,6 +1229,7 @@ The result is a deflationary token with increasing scarcity over time — the op
 | buybackBps | 5,000 (50%) | `src/voting/scripts/deploy.js:240` |
 | TREASURY_RATE | 1000 (10%) | `scripts/deployAll.js:37` |
 | DEFAULT_COMMUNITY_FEE | 750 (75%) | `scripts/deployAll.js:44` |
+| VOTER_DEFAULT_V4_FEE | 70 (7.0%) | `scripts/deployAll.js:48` |
 | Emission Duration | 2.5 years | `Minter.sol:196` |
 | Base Rate Formula | `(budget×8)/(13×YEAR)` | `Minter.sol:198` |
 | Backrun Fee Factor | 5,000 (6x total) | `BackrunFeePlugin.sol:15` |
