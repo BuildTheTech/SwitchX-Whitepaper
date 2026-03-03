@@ -1,6 +1,6 @@
 # SwitchX Protocol Whitepaper
 
-**Version 1.0 — March 2026**
+**Version 1.0 — February 2026**
 
 ---
 
@@ -642,9 +642,9 @@ At launch, treasury-controlled vePower is expected to dominate, so protocol-fund
 
 Bribes are funded from treasury-controlled SWITCH reserves (primarily the premint bribe allocation, and optionally treasury-emission receipts if governance chooses). They are additive to normal emissions and should be managed conservatively early because direct bribes target the next period immediately (they are not drip-smoothed like fee rewards).
 
-During a treasury-dominant genesis phase, governance may temporarily set protocol-funded bribes to zero and rely on emissions-only LP incentives, preserving the bribe reserve for later external voter competition and partner matching when marginal bribe ROI is higher. This is an intended (and often preferable) launch posture when external bribers and non-treasury ve voters are not yet active. A conservative default policy can keep protocol-funded bribes at zero until treasury vote share falls below a defined activation threshold (e.g., 70%), after which treasury-aware scaling resumes automatically unless governance sets an explicit override.
+Current launch-default policy is conservative and deterministic: protocol-funded bribes default to `0` in epochs 1-2 when treasury vote share is at or above the activation threshold (default `70%`), and remain at `0` for epoch 3+ while treasury vote share stays at or above that same threshold. Once treasury share drops below the activation threshold, treasury-aware scaling (`phaseBudget`, multiplier, and optional floor) begins automatically unless governance sets an explicit override.
 
-Bribe allocation across pools can use deficit-aware targeting relative to vote-weight baselines, with concentration caps and bounded weekly shifts. Governance retains override authority for exceptional market conditions.
+Bribe allocation across pools uses deficit-aware targeting relative to vote-weight baselines, with concentration caps and bounded weekly shifts. Governance retains override authority for exceptional market conditions.
 
 ---
 
@@ -797,6 +797,17 @@ Each vault manages two positions simultaneously:
 
 The base position provides broad liquidity coverage and resilience to price movements. The limit position captures the majority of fees by concentrating liquidity near the current price. Together, they balance capital efficiency against impermanent loss risk.
 
+**Non-Straddling Range Construction:**
+
+Both positions are constructed as **non-straddling ranges** — neither position spans the current tick. Instead, they sit on opposite sides of the current price, oriented by the vault's deposit token:
+
+| Vault Type | Base Position | Limit Position |
+|------------|---------------|----------------|
+| **Token0-heavy** (`allowToken0`) | Strictly **above** current tick (deposit-token side) | Strictly **below** current tick (paired-token side) |
+| **Token1-heavy** (`allowToken1`) | Strictly **below** current tick (deposit-token side) | Strictly **above** current tick (paired-token side) |
+
+This side-specific placement ensures each position accumulates the token it is designed to hold as price moves through it. The current tick is rounded to tick-spacing boundaries to produce anchor points (`anchorUp`, `anchorDown`), and each range is clamped so it cannot cross the anchor into the opposite side. Range widths are calculated as a percentage of the slow TWAP price (e.g., `normalizedPrice × widthBps / 10000`), then converted to tick deltas symmetric around the anchor.
+
 **One-Sided Deposits:**
 
 Each vault is configured with `allowToken0` and `allowToken1` flags. In a typical dual-vault deployment per pool:
@@ -822,7 +833,7 @@ The `HybridRebalanceManager` implements a volatility-adaptive state machine that
 | **Normal** | Inventory balanced, low volatility | Standard position widths |
 | **OverInventory** | Too much of deposit token | Widen ranges, reduce limit position aggressiveness |
 | **UnderInventory** | Too little of deposit token | Tighten ranges, prioritize deposit token accumulation |
-| **Special** | Extreme conditions | Safety widths, potentially pause deposits |
+| **Special** | High or extreme volatility detected | Safety posture: wider safety-tier ranges during high volatility; fail-closed pause path during extreme volatility (`setDepositMax(0, 0)` + manager `paused`) until admin intervention |
 
 **TWAP-Driven Rebalancing:**
 
@@ -839,6 +850,19 @@ Rebalancing is triggered through the `AlmPlugin`'s `afterSwap` hook when:
 3. The system is not already in a rebalance
 4. Price deviation exceeds the configured threshold
 
+**Rebalance Cadence Guards:**
+
+Once triggered, the rebalance decision passes through a cascade of safety gates before execution:
+
+| Guard | Mechanism | Effect |
+|-------|-----------|--------|
+| **Extreme Volatility Check** | `fastSlowDiff ≥ extremeVolatility` OR `fastCurrentDiff ≥ extremeVolatility` | Hard stop — transitions to Special safety posture, pauses deposits, no rebalance executed |
+| **Min Time Throttle** | `block.timestamp < lastRebalanceTimestamp + minTimeBetweenRebalances` | Prevents rapid successive rebalances; returns `TooSoon` |
+| **Volatility Settlement Gate** | Rebalance needed but `fastCurrentDiff ≥ lowVolatility` | Defers execution until fast/current price divergence settles below the low-volatility threshold |
+| **Min Tick Width Skip** | Either base or limit range spans fewer than `minTickWidth` ticks | Skips rebalance entirely to prevent degenerate (too-narrow) positions |
+
+These guards execute in priority order: extreme volatility is checked first (immediate fail-closed), then time throttle, then volatility settlement, and finally tick-width validation. A rebalance only proceeds if all four gates pass. The manager updates `lastRebalanceTimestamp` on successful rebalance execution and on `NoNeedWithPending` housekeeping updates; `TooSoon` deferrals do not update it.
+
 **Volatility Tiers:**
 
 The manager classifies market conditions into volatility tiers and adjusts position widths accordingly. Thresholds are configurable per pool:
@@ -847,7 +871,7 @@ The manager classifies market conditions into volatility tiers and adjusts posit
 |------|-----------------|-------------------|--------|
 | **Low** | < 300 bps (3%) | < 50 bps (0.5%) | Standard position widths |
 | **High** | > 2,500 bps (25%) | > 200 bps (2%) | Wider base and limit positions |
-| **Extreme** | > 8,000 bps (80%) | > 500 bps (5%) | Maximum width safety positions, may pause deposits |
+| **Extreme** | > 8,000 bps (80%) | > 500 bps (5%) | Fail-closed: deposits paused, manager paused, no rebalance |
 
 Width configuration is pool-type-aware:
 
@@ -859,6 +883,34 @@ Width configuration is pool-type-aware:
 | limitHigh | 20% | 4% |
 
 Volatile pairs use wide day-0 safety margins for launch; stablecoin pairs use tight ranges for capital efficiency near the 1:1 peg. Stablecoin managers also apply tighter volatility gates (`priceChange=0.5%`, `lowVol=0.5%`, `highVol=2%`, `extremeVol=5%`) to detect and react to even small depegging events earlier.
+
+**Operational Parameters:**
+
+| Parameter | Default | Configurable | Purpose |
+|-----------|---------|-------------|---------|
+| `minTimeBetweenRebalances` | Pool-specific | Yes (`setMinTimeBetweenRebalances`) | Minimum seconds between consecutive rebalances |
+| `minTickWidth` | 100 ticks | Yes (`setMinTickWidth`) | Minimum range span; prevents degenerate positions |
+| `inventoryBias` | Pool-specific | Yes (`setInventoryBias`) | Adjusts deposit-token ratio targets per vault |
+| `underInventoryThreshold` | > 60% | Yes (`updateThresholds`) | Deposit-token ratio below which vault enters UnderInventory |
+| `overInventoryThreshold` | > normalThreshold | Yes (`updateThresholds`) | Deposit-token ratio above which vault enters OverInventory |
+| `priceChangeThreshold` | < 100% | Yes (`updateThresholds`) | Cumulative price drift that triggers rebalance within a state |
+| `depositTokenUnusedThreshold` | 1-100% | Yes (`updateThresholds`) | Idle deposit-token ratio that triggers rebalance |
+
+All thresholds are validated on-chain at configuration time to ensure internal consistency (e.g., `underInventory < normal < overInventory < simulate`). See the project's [launch checklist](docs/launch-checklist.md) for recommended day-0 parameter values per pool type.
+
+**Rebalance Lifecycle:**
+
+When all cadence guards pass, the vault executes a complete position teardown and reconstruction in a single atomic transaction:
+
+1. **Oracle Validation** — Verify TWAP oracle freshness; if stale, the rebalance manager exits gracefully (no revert) while external callers receive `StaleOracleData`
+2. **Tick Alignment** — Validate that proposed ranges align to the pool's live tick spacing and that base/limit positions are distinct
+3. **Reward Collection** — Collect accrued farming rewards from both existing positions before teardown
+4. **Position Teardown** — Remove 100% of liquidity from both positions, collect all tokens including accrued fees, burn the position NFTs
+5. **Fee Distribution** — Distribute collected fees to configured recipients (protocol, affiliate)
+6. **Optional Swap** — If the rebalance manager specifies a non-zero swap quantity, execute an in-pool swap to rebalance the vault's token composition for the new ranges
+7. **Position Reconstruction** — Mint the base position first with the vault's full token balances, then mint the limit position with the remaining tokens; position IDs are updated atomically
+
+The base-first minting order is intentional: the wide-range base position absorbs the majority of both tokens, and the narrow-range limit position concentrates whatever remains into a tighter range for higher fee capture.
 
 ### 11.3 Farming Integration
 
