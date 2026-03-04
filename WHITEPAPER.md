@@ -391,6 +391,8 @@ This produces a base rate of approximately 18.93 SWITCH per second (≈1,635,000
 
 The exact allocation mix is determined by protocol governance and can shift over time as priorities evolve. During early launch, a larger share may be directed toward governance power (burn locks) to prevent hostile takeover; as the protocol matures and decentralizes, the balance may shift toward growth and operational needs. The `TREASURY_RATE` itself can be scaled down over time (capped at 10% max on-chain). The remaining 90% flows to the Voter contract for distribution to gauges based on veNFT votes.
 
+All initial liquidity outputs — ALM vault shares, LP position NFTs, veNFT locks, and bootstrap mints — can be routed to a configurable recipient address (`INITIAL_LIQUIDITY_TREASURY`) distinct from the ongoing-fee treasury, with per-source overrides available for granular control.
+
 ### 6.6 Why Fixed Supply Matters
 
 In perpetual-emission ve(3,3) systems, token holders face a coordination problem: they must continuously lock and vote just to avoid dilution. New emissions create selling pressure that existing holders must absorb. The system works only as long as demand for emissions exceeds their supply — a condition that eventually fails.
@@ -649,9 +651,9 @@ Bribe allocation across pools uses deficit-aware targeting relative to vote-weig
 
 ### 8.7 Early-Epoch Fee Recycling
 
-During the initial launch epochs, governance may recycle a portion of treasury-received trading fees (the `v4Fee` share from `V4CommunityVault`) back into gauge rewards to bootstrap early voter participation. The recycling rate, duration, and per-pool allocation are governance parameters that may be adjusted each epoch.
+In early launch epochs, treasury-controlled veNFTs hold the dominant vote share and therefore earn the majority of voter-facing trading fee rewards from `DripVotingReward`. Rather than retaining these rewards, governance will recycle a majority of claimed fee rewards back into gauge reward pools to bootstrap external voter participation.
 
-Recycled fees can be split across both reward paths: `incentivize()` for immediate next-period visibility, and `topUpPoolBalance()` for drip-smoothed long-tail retention. Both are additive to organic fee flow. The split ratio, taper schedule, and per-pool targeting are determined by governance based on adoption KPIs. Each recycling event is published with exact amounts, mechanism used, and transaction hashes.
+Recycled fees can be split across both reward paths: `incentivize()` for immediate next-period visibility, and `topUpPoolBalance()` for drip-smoothed long-tail retention. Both are additive to organic fee flow. The recycling rate, split ratio, per-pool targeting, and taper schedule are evaluated each epoch based on KPIs including external vote share growth, TVL trajectory, and trading volume trends. As external participation grows and treasury vote dominance naturally declines, the recyclable share decreases organically — the policy is designed to phase itself out. Each recycling event is published with exact amounts, mechanism used, and transaction hashes.
 
 ---
 
