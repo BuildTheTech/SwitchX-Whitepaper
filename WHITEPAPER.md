@@ -597,6 +597,7 @@ SwitchX replaces this with the `DripVotingReward` contract, which pools fees and
 - **Catch-up**: If drip checkpoints are missed (no one interacts for several periods), up to 52 periods can be processed in a single call
 - **No-vote protection**: If no veNFTs vote for a gauge in a period, fees are not released to that period (they remain in the pool for future periods when votes exist)
 - **Bribe compatibility**: Direct bribes (`incentivize()`) bypass the drip mechanism and target the next period directly, preserving standard ve(3,3) bribe semantics
+- **Treasury/operator pool top-ups**: A role-gated top-up path (`TOP_UP_ROLE`) can add tokens directly to `poolBalance` for future drip release, enabling treasury fee recycling and delegated launch-ops execution without changing contract ownership
 
 **Example:**
 
@@ -645,6 +646,12 @@ Bribes are funded from treasury-controlled SWITCH reserves (primarily the premin
 Current launch-default policy is conservative and deterministic: protocol-funded bribes default to `0` in epochs 1-2 when treasury vote share is at or above the activation threshold (default `70%`), and remain at `0` for epoch 3+ while treasury vote share stays at or above that same threshold. Once treasury share drops below the activation threshold, treasury-aware scaling (`phaseBudget`, multiplier, and optional floor) begins automatically unless governance sets an explicit override.
 
 Bribe allocation across pools uses deficit-aware targeting relative to vote-weight baselines, with concentration caps and bounded weekly shifts. Governance retains override authority for exceptional market conditions.
+
+### 8.7 Early-Epoch Fee Recycling
+
+During the initial launch epochs, governance may recycle a portion of treasury-received trading fees (the `v4Fee` share from `V4CommunityVault`) back into gauge rewards to bootstrap early voter participation. The recycling rate, duration, and per-pool allocation are governance parameters that may be adjusted each epoch.
+
+Recycled fees can be split across both reward paths: `incentivize()` for immediate next-period visibility, and `topUpPoolBalance()` for drip-smoothed long-tail retention. Both are additive to organic fee flow. The split ratio, taper schedule, and per-pool targeting are determined by governance based on adoption KPIs. Each recycling event is published with exact amounts, mechanism used, and transaction hashes.
 
 ---
 
