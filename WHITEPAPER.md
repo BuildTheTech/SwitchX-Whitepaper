@@ -81,7 +81,7 @@ SwitchX is built on a modular architecture where each layer composes with the ne
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        VOTING LAYER                             │
-│  VotingEscrow (veNFT) · Voter · Minter · Gauges · Rewards      │
+│  VotingEscrow (veNFT) · Voter · Minter · Gauges · Rewards       │
 │  ProtocolFeeManager · DripVotingReward                          │
 └────────────────────────────┬────────────────────────────────────┘
                              │
@@ -92,12 +92,12 @@ SwitchX is built on a modular architecture where each layer composes with the ne
                              │
 ┌────────────────────────────┴────────────────────────────────────┐
 │                       FARMING LAYER                             │
-│  FarmingCenter · V4EternalFarming · EternalVirtualPool           │
+│  FarmingCenter · V4EternalFarming · EternalVirtualPool          │
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────┴────────────────────────────────────┐
 │                       PLUGIN LAYER                              │
-│  SwitchXBasePlugin: DynamicFee · BackrunFee · CrossDexOracleFee  │
+│  SwitchXBasePlugin: DynamicFee · BackrunFee · CrossDexOracleFee │
 │  FeeDiscount · SecurityPlugin · LimitOrderPlugin                │
 │  MevBackrunPlugin · VolatilityOraclePlugin · FarmingProxyPlugin │
 │  AlmPlugin                                                      │
