@@ -158,7 +158,7 @@ The DynamicFeePlugin calculates the override fee based on recent price volatilit
 
 ### 4.3 Community Fee
 
-A configurable portion of all swap fees is diverted to the ve(3,3) system through the community fee mechanism. At launch, this is set to **75%** (`communityFee = 750`), meaning 75% of every swap fee collected flows to the Voter contract for distribution to veNFT holders who vote on that pool's gauge. The remaining 25% accrues directly to liquidity providers (including ALM vault depositors).
+A configurable portion of all swap fees is diverted to the ve(3,3) system through the community fee mechanism. At launch, this is set to **75%** (`communityFee = 750`), meaning 75% of every swap fee collected enters the community-fee pathway. Of that community-fee flow, the launch-default voter-side v4 fee sends **7%** to treasury and **93%** to veNFT voter rewards for the pool’s gauge. The remaining 25% of the original swap fee accrues directly to liquidity providers (including ALM vault depositors).
 
 This split maximizes voter revenue — strengthening the ve(3,3) flywheel — while still leaving meaningful fee income for ALM vault depositors alongside their farming emissions. Industry benchmarks (Aerodrome, Velodrome) route 100% to voters; SwitchX's 75% ensures ALM vault depositors retain a direct fee incentive even after emissions end.
 
@@ -218,6 +218,10 @@ SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWIT
 
 The USDC/DAI stablecoin pair uses the same adaptive curve as USDC/WPLS (0.20% base, 1.0% max). Under normal conditions, stablecoins exhibit minimal volatility, so the fee stays near 0.20%. During depeg events (e.g., USDC dropping to $0.87 as in March 2023), the fee rises toward 1.0% to compensate LPs for impermanent loss. This full-range protection is appropriate because USDC/DAI is positioned as a vampire pool (1% deposit + 1% withdraw vault fees, 90% auto-lock) where competitiveness is secondary to LP protection and voter revenue capture.
 
+Day-one reserved activations inherit the same live-market fee logic. The activated set is `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/WPLS`, and `WBTC/DAI`; each ships with public dual-vault ALM, dedicated rebalance managers, deterministic bootstrap activation, and a 0.20% adaptive base fee. `SWITCH/DAI` remains at 0.30% as a monopoly SWITCH pair. All other reserved pools remain parked on the factory default 0.10% floor until they are intentionally activated with seeded liquidity and pair-specific routing assumptions.
+
+The launch-day high-volume PulseX-parity subset is `USDC/WPLS`, `USDC/DAI`, `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/WPLS`, and `WBTC/DAI`. Those pools run the full parity stack: `CrossDexOracleFee`, PulseX backrun executor allowlisting, and default arbitrage-keeper coverage. This means every activated reserved pool now ships with the same live-market posture instead of splitting activation into parity vs. non-parity subclasses.
+
 ### 5.2 MEV Protection (Bot-Proof Backrun Fee)
 
 A **sandwich attack** is the most common form of MEV extraction on DEXs: an attacker front-runs a user's swap to move the price against them, then back-runs (reverses direction) immediately after to capture the difference as profit. The victim receives worse execution, effectively paying a hidden tax to the attacker. On many DEXs this occurs silently and at scale.
@@ -243,7 +247,7 @@ The `CrossDexOracleFeePlugin` addresses this by reading PulseX pair reserves on 
 2. It compares this against the SwitchX pool's `sqrtPriceX96`
 3. If the swap moves the SwitchX price **toward** the external price (corrective / arb direction), a surcharge is applied
 4. The surcharge is proportional to the price deviation, minus the existing dynamic + backrun fee (no double-charging)
-5. Safety guard: same-block reserve updates and stale oracle reserves (>30 minutes old) are ignored to reduce reserve-skew manipulation risk
+5. Safety guard: current-block reserve updates and stale oracle reserves (>5 minutes old) are never used as the external reference; if the live PulseX read is unusable, the surcharge is skipped rather than charged from cached state
 
 **Surcharge formula:**
 
@@ -258,9 +262,9 @@ totalFee  = existingFee + min(surcharge, cap)
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `stalenessFeeFactor` | 5,000 (50%) | Fraction of deviation targeted as total fee |
-| `stalenessFeeCapHBips` | 30,000 (3%) | Maximum surcharge cap |
+| `stalenessFeeCapHBips` | 10,000 (1%) | Maximum surcharge cap |
 | `minDeviationBps` | 20 (0.2%) | Noise filter — deviations below this are ignored |
-| `maxOracleReserveAge` | 1,800s (30 min) | Fail-open if external reserve timestamp is stale |
+| `maxOracleReserveAge` | 300s (5 min) | Maximum age for a live external reserve snapshot before the surcharge fails open |
 
 **Direction detection:**
 
@@ -539,7 +543,7 @@ This creates the ve(3,3) alignment: voters are incentivized to direct emissions 
 ### 8.2 Community Fee Collection
 
 When a swap occurs in any pool:
-1. The community fee percentage (75%) of the swap fee is collected by `V4CommunityVault` (7% of the fee goes to the treasury)
+1. The community fee percentage (75%) of the swap fee is collected by `V4CommunityVault`; from that community-fee balance, 7% is diverted to the treasury via the voter-side v4 fee and the remaining 93% continues into voter rewards
 2. The Voter contract claims these fees during the `distribute()` call
 3. Fees are routed through the `ProtocolFeeManager` for processing
 4. Processed fees are deposited into the pool's `DripVotingReward` contract
@@ -685,16 +689,24 @@ The auto-lock system is SwitchX's mechanism for compounding governance alignment
    - **Native pools** (SWITCH/WPLS, SWITCH/USDC): **50%** auto-locked — balances governance compounding with farmer liquidity
    - **Non-native pools** (USDC/WPLS): **75%** auto-locked — standard non-SWITCH pool, lighter friction for routing backbone
    - **Vampire pools** (USDC/DAI): **90%** auto-locked — maximum anti-mercenary protection; zero-IL stablecoin pair where farmers have no need for liquid SWITCH
-   - **On-chain cap**: `MAX_AUTO_LOCK_PERCENTAGE = 9000` (90% maximum, enforced in `V4EternalFarming`)
+   - **On-chain cap**: `MAX_AUTO_LOCK_PERCENTAGE = 10000` (100% maximum, enforced in `V4EternalFarming`)
    - **Per-pool override**: `autoLockConfigByPool[pool]` allows governance to adjust each pool independently
    - **Default fallback**: `defaultAutoLockPercentage` applies to pools without explicit configuration (launch deployment initializes this to **50%** as a safety baseline; per-pool overrides remain authoritative)
 
-3. When the user claims locked rewards:
-   - If `immediateLockOnClaim` is enabled (default: true), the contract attempts to create a veNFT immediately via `create_lock_for(amount, MAXTIME, recipient)`
-   - If the lock creation fails (e.g., contract interaction issues), the amount is credited to `_lockedCredits` for later manual locking via `lockReserved()`
-   - If `immediateLockOnClaim` is disabled, all locked rewards go to `_lockedCredits`
+3. When the user claims locked rewards, the reward tokens are forwarded into a shared `AutoLockManager` used by both `V4EternalFarming` and `FarmingRewardsDistributor`:
+   - If `immediateLockOnClaim` is enabled (default: true), the manager first tries to top up the user's preferred veNFT if the user explicitly approved that NFT to the manager and registered it as the preferred target
+   - If no valid preferred target exists, the manager falls back to creating a fresh veNFT at full `MAXTIME`; only users who had already opted into a preferred target get that stored target refreshed to the newly minted fallback lock
+   - If active lock execution fails during claim processing, the amount is reserved as manager-held locked credits instead of reverting the claim
+   - If `immediateLockOnClaim` is disabled, all locked rewards are reserved as manager-held locked credits
 
-4. Users with credited locked rewards can call `lockReserved(rewardToken, amount)` to create a veNFT at any time
+4. Reserved credits are unified per `user + rewardToken` across farming and ALM distributor flows, so `AutoLockManager.lockReserved(rewardToken, amount)` can consume a single aggregate balance even if credits originated in multiple contracts
+
+5. During an emergency pause, the manager stops new VotingEscrow interactions but still accepts newly reserved credits, preserving claims and unified accounting while disabling the risky external-call path
+
+6. `AutoLockManager` is also the canonical event source for claim-time auto-lock outcomes:
+   - `CreditsReserved` / `BurnCreditsReserved` when claim-time locking is deferred or fails softly
+   - `ClaimRewardsLocked` / `ClaimBurnRewardsLocked` when claim-time locking succeeds
+   - Manual deferred-credit consumption remains manager-native via `lockReserved()` / `lockBurnReserved()`
 
 **Exempt accounts:**
 
@@ -702,6 +714,20 @@ Addresses with the `AUTO_LOCK_EXEMPT_ROLE` receive 100% of rewards as free (no a
 - ALM vault contracts (which need liquid tokens for rebalancing)
 - Protocol-owned positions
 - Any address the administrator designates
+
+**Per-pool burn lock mode:**
+
+In addition to max-time decaying locks, pools can be configured to use **burn lock mode** (`LockMode.BurnLock`). When a pool's auto-lock config specifies burn lock:
+
+- The locked portion of rewards is routed through `AutoLockManager` to create permanent, irreversible burn veNFTs via `VotingEscrow.create_burn()` and `VotingEscrow.increase_burn()`
+- Burn locks grant **2x permanent voting power** that never decays, incentivizing the strongest possible governance alignment
+- Burn credits are tracked separately from max-lock credits (`_burnCredits` vs `_lockedCredits`) to prevent bypass — if a pool mandates burn-only locking, users cannot redirect those credits to a decaying max-lock
+- Burn locks consolidate into a single burn veNFT per user via `burnTargets[user]`. The first burn creates a fresh burn veNFT and auto-stores it as the user's burn target; subsequent burns top up the same veNFT via `increase_burn()` once the user approves the AutoLockManager on that veNFT
+- Users can set or clear their burn target via `setBurnTarget(tokenId)` / `clearBurnTarget()`. Clearing removes the current pointer but the next successful `create_burn` fallback will auto-store the new burn veNFT again. Users must approve the AutoLockManager on their burn veNFT for consolidation via `increase_burn()` to work
+- If the burn lock attempt fails, credits are reserved as burn credits claimable later via `AutoLockManager.lockBurnReserved()`
+- A pool's lock mode is immutable once set — governance cannot retroactively reclassify rewards between max-lock and burn-lock. The `enabled` flag only decides whether the pool uses its own percentage override or the default percentage; it does not alter burn-vs-max routing once the mode is set.
+
+This gives governance the flexibility to designate certain pools (e.g., core liquidity pairs, strategic partnerships) for permanent burn-lock commitment, while others remain as standard max-time locks.
 
 **Why auto-lock matters:**
 
@@ -989,7 +1015,7 @@ Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH toke
 - **SafeERC20**: All token transfers use OpenZeppelin's SafeERC20 to handle non-standard ERC20 implementations
 - **Overflow protection**: Solidity 0.8.x built-in overflow checks, supplemented by SafeCast for critical conversions
 - **DripVotingReward DoS protection**: Catch-up is capped at 52 periods per call to prevent unbounded gas consumption
-- **Minimum shares + deterministic bootstrap**: ALM vaults enforce a minimum share amount (`MIN_SHARES = 1000`) and launch scripts bootstrap any empty vault with a minimal initial deposit to close first-deposit inflation/donation windows before public flow
+- **Minimum shares + deterministic bootstrap**: ALM vaults enforce a hardened minimum share amount (`MIN_SHARES = 1e6`), reject deposits that would round down to `0` shares, and launch scripts bootstrap any empty vault with a minimal initial deposit to further reduce first-deposit inflation/donation windows before public flow
 
 ### 12.7 Governance Decentralization Roadmap
 
@@ -1295,9 +1321,9 @@ The result is a deflationary token with increasing scarcity over time — the op
 | Base Rate Formula | `(budget×8)/(13×YEAR)` | `Minter.sol:198` |
 | Backrun Fee Factor | 5,000 (6x total) | `BackrunFeePlugin.sol:15` |
 | Max Backrun Factor | 10,000 (11x total) | `BackrunFeePlugin.sol:13` |
-| LVR Capture Rate | 5,000 (50%) | `CrossDexOracleFeePlugin.sol:51` |
-| LVR Surcharge Cap | 30,000 (3%) | `CrossDexOracleFeePlugin.sol:52` |
-| LVR Min Deviation | 20 (0.2%) | `CrossDexOracleFeePlugin.sol:53` |
+| LVR Capture Rate | 5,000 (50%) | `CrossDexOracleFeePlugin.sol:53` |
+| LVR Surcharge Cap | 10,000 (1%) | `CrossDexOracleFeePlugin.sol:54` |
+| LVR Min Deviation | 20 (0.2%) | `CrossDexOracleFeePlugin.sol:55` |
 | ALM Fast TWAP | 15 minutes | `scripts/deployAll.js:70` |
 | ALM Slow TWAP | 2 hours | `scripts/deployAll.js:71` |
 | Min Rebalance Interval | 600 seconds | `scripts/deployAll.js:73` |
