@@ -218,7 +218,7 @@ SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWIT
 
 The USDC/DAI stablecoin pair uses the same adaptive curve as USDC/WPLS (0.20% base, 1.0% max). Under normal conditions, stablecoins exhibit minimal volatility, so the fee stays near 0.20%. During depeg events (e.g., USDC dropping to $0.87 as in March 2023), the fee rises toward 1.0% to compensate LPs for impermanent loss. This full-range protection is appropriate because USDC/DAI is positioned as a vampire pool (1% deposit + 1% withdraw vault fees, 90% auto-lock) where competitiveness is secondary to LP protection and voter revenue capture.
 
-Day-one reserved activations inherit the same live-market fee logic. The activated set is `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/WPLS`, and `WBTC/DAI`; each ships with public dual-vault ALM, dedicated rebalance managers, deterministic bootstrap activation, and a 0.20% adaptive base fee. `SWITCH/DAI` remains at 0.30% as a monopoly SWITCH pair. All other reserved pools remain parked on the factory default 0.10% floor until they are intentionally activated with seeded liquidity and pair-specific routing assumptions.
+Day-one reserved activations inherit the same live-market fee logic. The activated set is `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/WPLS`, and `WBTC/DAI`; each ships with public dual-vault ALM, dedicated rebalance managers, deterministic bootstrap activation, and a 0.20% adaptive base fee. Those vaults now launch fail-closed on deposits: bootstrap deposits create positions, but public deposit caps remain at zero until a manual unlock verifies plugin wiring, manager liveness, oracle maturity, and current/fast/slow local prices within a bounded PulseX parity tolerance. When unlocked, the vaults reopen with finite side-specific caps rather than unlimited intake. `SWITCH/DAI` remains at 0.30% as a monopoly SWITCH pair. All other reserved pools remain parked on the factory default 0.10% floor until they are intentionally activated with seeded liquidity and pair-specific routing assumptions.
 
 The launch-day high-volume PulseX-parity subset is `USDC/WPLS`, `USDC/DAI`, `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/WPLS`, and `WBTC/DAI`. Those pools run the full parity stack: `CrossDexOracleFee`, PulseX backrun executor allowlisting, and default arbitrage-keeper coverage. This means every activated reserved pool now ships with the same live-market posture instead of splitting activation into parity vs. non-parity subclasses.
 
@@ -232,6 +232,7 @@ The `BackrunFeePlugin` eliminates this attack vector by making the back-run leg 
 - **Surcharge formula**: `updatedFee = baseFee + (baseFee × backrunFeeFactor / 1000)`
 - **Default factor**: `5000` (i.e., +500%, resulting in 6x the base fee)
 - **Maximum factor**: `10000` (10x surcharge, 11x total)
+- **Public fee ceiling**: same-block backrun pricing is clipped at `18,000` hundredths of a bip (1.8%) to avoid pathological multi-percent public fills during extreme volatility
 
 **Why regular users are unaffected**: The surcharge only triggers on same-block direction reversals — a pattern that characterizes sandwich back-runs, not ordinary trading. Users swapping in different blocks, or in the same direction as the prior price movement, always pay the standard fee. In practice, this means normal traders never see the surcharge while sandwich bots face fees that exceed their expected profit, making the attack unprofitable.
 
@@ -262,7 +263,7 @@ totalFee  = existingFee + min(surcharge, cap)
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `stalenessFeeFactor` | 5,000 (50%) | Fraction of deviation targeted as total fee |
-| `stalenessFeeCapHBips` | 10,000 (1%) | Maximum surcharge cap |
+| `stalenessFeeCapHBips` | 5,000 (0.5%) | Maximum surcharge cap |
 | `minDeviationBps` | 20 (0.2%) | Noise filter — deviations below this are ignored |
 | `maxOracleReserveAge` | 300s (5 min) | Maximum age for a live external reserve snapshot before the surcharge fails open |
 
@@ -332,7 +333,7 @@ For launch, limit-order hooks are disabled on ALM launch pools to prioritize swa
 | **Emission Budget** | 970,000,000 SWITCH (97.0% of cap) |
 | **Emission Duration** | 2.5 years |
 
-The SWITCH token has a **hard cap** enforced at the smart contract level. No more than 1 billion tokens can ever exist. This stands in contrast to standard ve(3,3) implementations where emissions continue indefinitely.
+The SWITCH token has a **hard cap** enforced at the smart contract level. No more than 1 billion tokens can ever exist. This stands in contrast to standard ve(3,3) implementations where emissions continue indefinitely. The token also enforces a finite cumulative emission budget, so burned supply does not recreate mintable headroom even though `totalSupply` decreases over time. SWITCH supports **EIP-2612 permit** (gasless approvals via off-chain signatures), enabling gasless allowance setting for VotingEscrow locks and other integrations.
 
 ### 6.2 Premint Allocation
 
@@ -362,7 +363,7 @@ Emissions follow a three-phase halving schedule over 2.5 years:
 | Year 2.5 | 6 months | Quarter rate | ~409,000 SWITCH/day | ~74,615,385 |
 | **Total** | **2.5 years** | — | — | **~970,000,000** |
 
-**After 2.5 years, emissions stop permanently.** No tail emissions, no governance vote to extend them. The emission budget is fully consumed and the token supply is fixed forever.
+**After 2.5 years, emissions stop permanently.** The launch Minter is configured for a terminal 2.5-year schedule with no tail emissions, and SWITCH's finite cumulative emission budget ensures that burned tokens do not recreate emission capacity.
 
 ### 6.4 Base Rate Formula
 
@@ -429,7 +430,7 @@ Users lock SWITCH tokens for a chosen duration (up to 2 years / `MAXTIME`) to re
 Burn locks are SwitchX's most distinctive governance feature. Instead of locking tokens for a finite period, holders can **irreversibly burn** their SWITCH tokens in exchange for permanent, non-decaying voting power. Unlike protocols such as Blackhole, where "burn" refers to permanently locked (but not destroyed) tokens, SwitchX burn locks are true burns: the underlying SWITCH is permanently destroyed, reducing total supply. This distinction is unique among ve(3,3) implementations.
 
 **Mechanism:**
-1. User calls `burn_lock(tokenId)` on an existing veNFT, or `create_burn(amount, recipient)` for a new one
+1. User calls `burn_lock(tokenId)` on an existing veNFT, `create_burn(amount)` for self, or `create_burn_for(amount, recipient)` for another wallet
 2. The underlying SWITCH tokens are **permanently destroyed** via the `burn()` function
 3. The veNFT receives permanent voting power equal to `burnedAmount × burnMultiplierBps / MAX_BPS`
 
@@ -540,6 +541,8 @@ SwitchX operates on a weekly epoch cycle:
 
 This creates the ve(3,3) alignment: voters are incentivized to direct emissions to the most productive pools (highest fees), which in turn generates the highest returns for those voters.
 
+To keep vote casting, recasting (`poke`), and vote clearing (`reset`) executable under production gas limits as the gauge set grows, the Voter enforces a hard per-ballot fanout cap of **32 pools per veNFT per epoch** (`MAX_VOTE_POOLS`). This is an operational safety bound, not an emissions-policy target: it exists to prevent oversized ballots from becoming uncallable as each voted pool adds reward-accounting and storage work.
+
 ### 8.2 Community Fee Collection
 
 When a swap occurs in any pool:
@@ -593,32 +596,49 @@ SwitchX replaces this with the `DripVotingReward` contract, which pools fees and
 
 **Mechanism:**
 1. Fees arrive via `notifyRewardAmount()` from the Voter during `distribute()`
-2. The **drip rate** (`dripRate = 1000`, i.e., 10%) determines what fraction of the pool is released each period
-3. On each period transition, the contract releases `poolBalance × dripRate / 10000` to the current period
+2. The **drip rate** (launch default `dripRate = 2000`, i.e., 20%) determines what fraction of the pool is released each period
+3. When a voted-period checkpoint occurs, the contract can release `poolBalance × dripRate / 10000` for each processed period, crediting the aggregate to the current voted period and leaving the remainder in the pool
 4. Voters claim rewards proportional to their vote weight in each period
 
 **Properties:**
 - **Smoothing**: A single large fee event is spread over multiple periods, reducing reward volatility
-- **Compounding**: The pool decreases geometrically (90% retained each period), creating a long tail of rewards
+- **Compounding**: The pool decreases geometrically (80% retained each period at the 20% launch default), creating a long tail of rewards
 - **Catch-up**: If drip checkpoints are missed (no one interacts for several periods), up to 52 periods can be processed in a single call
-- **No-vote protection**: If no veNFTs vote for a gauge in a period, fees are not released to that period (they remain in the pool for future periods when votes exist)
+- **No-vote protection**: If no veNFTs vote for a gauge in a period, nothing becomes claimable for that empty period. Fees still sitting in the V4 community vault are not forwarded until a later voted `distribute()` call, and already-pooled balance does not release until a later voted checkpoint path runs
 - **Bribe compatibility**: Direct bribes (`incentivize()`) bypass the drip mechanism and target the next period directly, preserving standard ve(3,3) bribe semantics
 - **Treasury/operator pool top-ups**: A role-gated top-up path (`TOP_UP_ROLE`) can add tokens directly to `poolBalance` for future drip release, enabling treasury fee recycling and delegated launch-ops execution without changing contract ownership
+- **Strategic implication**: This is intentionally different from a traditional immediate-payout `VotingReward`. Lower drip rates reward sustained voting on productive gauges because large fee backlogs are realized over many active epochs rather than all at once. SwitchX launches at a 20% weekly drip so rewards are still smoothed, but a single fee batch is roughly 60% distributed after ~4 active drip epochs, ~80% after ~8, and ~90% after ~11
+- **Governance flexibility**: Governance can raise `dripRate` later if faster payout is desired, but operators should checkpoint active drip tokens first so a new rate does not retroactively reprice missed periods
 
 **Example:**
 
-If a pool accumulates 10,000 DAI in fees with a 10% drip rate:
+If a pool accumulates 10,000 DAI in fees with the 20% launch drip rate:
 
 | Period | Released | Pool Remaining |
 |--------|----------|----------------|
-| 1 | 1,000 | 9,000 |
-| 2 | 900 | 8,100 |
-| 3 | 810 | 7,290 |
-| 4 | 729 | 6,561 |
+| 1 | 2,000 | 8,000 |
+| 2 | 1,600 | 6,400 |
+| 3 | 1,280 | 5,120 |
+| 4 | 1,024 | 4,096 |
 | ... | ... | ... |
-| 10 | ~387 | ~3,487 |
+| 10 | ~268 | ~1,074 |
 
-After 10 periods, ~65% of the original fees have been distributed, with the remainder continuing to drip over subsequent periods.
+After 10 periods, ~89% of the original fees have been distributed, with the remainder continuing to drip over subsequent periods.
+
+#### Planned Governance Upgrade: Trustless Reward-Pool Rehypothecation
+
+SwitchX intends to propose a future governance-approved upgrade path to make unreleased `DripVotingReward` pool balances productive instead of idle. The intent is to rehypothecate pooled reward inventory into trustless yield strategies so the same underlying fee inventory can earn incremental return while it is waiting to drip out to voters.
+
+This is a **roadmap item, not current launch behavior**. At launch, pooled rewards simply remain inside `DripVotingReward` until later periods release them. The planned upgrade is intended to preserve the core voter promise while improving capital efficiency:
+
+- **Principal remains voter-owned economic inventory**: pooled rewards are still economically reserved for future voter distribution
+- **Yield accrues back to voters**: any incremental earnings generated from the pooled inventory are intended to increase the total value available to voting-reward recipients
+- **Trustless deployment requirement**: the strategy layer is intended to be rules-based and contract-enforced rather than dependent on off-chain custody or discretionary treasury management
+- **Conservative integration standard**: only strategies that preserve liquidity, withdrawal predictability, and reward-accounting correctness should be considered acceptable
+- **Governance gate**: no such upgrade should be activated until governance has reviewed and approved the design
+- **Audit gate**: no such upgrade should be activated without standalone specification, formal review of accounting invariants, and fresh external audit coverage
+
+In practical terms, this means SwitchX can launch with a smoothed drip model today, then later upgrade that idle pooled inventory into an additional yield-bearing layer for voters without abandoning the core ve(3,3) reward flow. The launch recommendation of a `20%` weekly drip is still based on short- and medium-term growth, voter UX, and reduced dependence on treasury recycling during bootstrap; the rehypothecation layer is intended as a later enhancement, not as a prerequisite for launch success.
 
 ### 8.5 Staged Launch Emission Direction
 
@@ -810,6 +830,7 @@ Operational defaults:
 - StableSwap repayment routes are enabled for USDC/DAI directions.
 - Mixed repayment routes are enabled for USDC/WPLS directions through DAI + StableSwap (`WPLS -> DAI -> USDC` and reverse).
 - V4 flash borrow path is guarded by a global kill-switch (`v4FlashBorrowEnabled`) and is enabled by default at launch.
+- The off-chain arbitrage keeper uses bounded per-arb sizing only for modeled V4-flash opportunities at launch: it finds the first profitable borrow, then only upsizes within a discrepancy-scaled band instead of always pushing to the maximum profitable notional. PulseX-pair and self-funded opportunities keep full max-profit sizing. This targets the observed V4 overshoot mode while still allowing repeated same-cycle corrective arbs.
 - `SecurityRegistry` flash status must be `ENABLED` for V4 flash borrowing.
 - **Self-funded mode** (`selfFundedEnabled`): When the executor contract holds token balances, it uses them directly instead of borrowing — eliminating the 0.01–0.29% borrow fee per arb. After the MEV swap, a buyback restores the spent tokens from the output. Failed arbs revert atomically (no loss of capital). Ships dark (disabled by default); activation sequence: fund executor → `setSelfFundedEnabled(true)` → monitor. Instant rollback: `setSelfFundedEnabled(false)` falls back to flash borrows.
 
@@ -841,7 +862,7 @@ Both positions are constructed as **non-straddling ranges** — neither position
 | **Token0-heavy** (`allowToken0`) | Strictly **above** current tick (deposit-token side) | Strictly **below** current tick (paired-token side) |
 | **Token1-heavy** (`allowToken1`) | Strictly **below** current tick (deposit-token side) | Strictly **above** current tick (paired-token side) |
 
-This side-specific placement ensures each position accumulates the token it is designed to hold as price moves through it. The current tick is rounded to tick-spacing boundaries to produce anchor points (`anchorUp`, `anchorDown`), and each range is clamped so it cannot cross the anchor into the opposite side. Range widths are calculated as a percentage of the slow TWAP price (e.g., `normalizedPrice × widthBps / 10000`), then converted to tick deltas symmetric around the anchor.
+This side-specific placement ensures each position accumulates the token it is designed to hold as price moves through it. The current tick is rounded to tick-spacing boundaries to produce anchor points (`anchorUp`, `anchorDown`), and each range is clamped so it cannot cross the anchor into the opposite side. Range widths are calculated as a percentage of the slow TWAP price (e.g., `normalizedPrice × widthBps / 10000`), then converted to tick deltas symmetric around the anchor. An important operational consequence is that pool-level `liquidity()` can be `0` immediately after a fresh non-straddling rebalance if no other LP is currently straddling the active tick; the vault is still correctly activated as long as it has minted positions and swaps can move price into those ranges.
 
 **One-Sided Deposits:**
 
@@ -1007,7 +1028,7 @@ Role-based access control is enforced throughout the protocol:
 
 ### 12.5 Upgradability
 
-Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH token) use the UUPS proxy pattern with `Ownable2StepUpgradeable` for secure ownership transfers. Upgrades require explicit acceptance by the new owner, preventing accidental or malicious ownership changes.
+Critical operational contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager) use the UUPS proxy pattern with `Ownable2StepUpgradeable` for secure ownership transfers. Upgrades require explicit acceptance by the new owner, preventing accidental or malicious ownership changes. The SWITCH governance token is deployed as an immutable contract (no proxy) with standard `Ownable2Step` to maximize trust on DexScreener and similar platforms; only its `owner` role (controlling `setMinter`) is subject to governance transfer.
 
 ### 12.6 Additional Safeguards
 
@@ -1015,6 +1036,7 @@ Critical contracts (VotingEscrow, Voter, Minter, ProtocolFeeManager, SWITCH toke
 - **SafeERC20**: All token transfers use OpenZeppelin's SafeERC20 to handle non-standard ERC20 implementations
 - **Overflow protection**: Solidity 0.8.x built-in overflow checks, supplemented by SafeCast for critical conversions
 - **DripVotingReward DoS protection**: Catch-up is capped at 52 periods per call to prevent unbounded gas consumption
+- **Reward fanout guidance**: Reward contracts are not hard-capped on-chain, because permissionless incentive tracking must not be able to block later fee forwarding. Operationally keep distinct reward tokens per gauge low (target `<=16`) so all-token claim and accounting loops retain comfortable gas headroom
 - **Minimum shares + deterministic bootstrap**: ALM vaults enforce a hardened minimum share amount (`MIN_SHARES = 1e6`), reject deposits that would round down to `0` shares, and launch scripts bootstrap any empty vault with a minimal initial deposit to further reduce first-deposit inflation/donation windows before public flow
 
 ### 12.7 Governance Decentralization Roadmap
@@ -1023,7 +1045,7 @@ At launch, the deployer address holds admin keys for operational agility during 
 
 **Phase 1 — Launch (Weeks 0-4)**: The deployer retains direct ownership of upgradeable contracts to enable rapid response to any issues discovered in the live environment. All admin actions are logged and auditable on-chain.
 
-**Phase 2 — Timelock Transfer (Post-Stabilization)**: Once the protocol is operating smoothly, ownership of all upgradeable contracts (SWITCH token, VotingEscrow, Voter, Minter, ProtocolFeeManager, ALM vaults) is transferred to the `SwitchXTimelock` — an OpenZeppelin `TimelockController` with a configurable minimum delay. This ensures that all upgrades and parameter changes are publicly queued before execution, giving the community time to review and react.
+**Phase 2 — Timelock Transfer (Post-Stabilization)**: Once the protocol is operating smoothly, ownership of all governed contracts — both upgradeable (VotingEscrow, Voter, Minter, ProtocolFeeManager, ALM vaults) and immutable with admin functions (SWITCH token's `setMinter`) — is transferred to the `SwitchXTimelock`, an OpenZeppelin `TimelockController` with a configurable minimum delay. This ensures that all upgrades and parameter changes are publicly queued before execution, giving the community time to review and react. Note: the SWITCH token is deployed as an immutable contract (no proxy) to maximize trust on DexScreener and similar platforms; only its `owner` role (controlling `setMinter`) transfers to the timelock.
 
 **Phase 3 — Community Governance**: Proposer and executor roles on the timelock are transitioned to a community multisig or on-chain governance module, completing the path from deployer-controlled to community-governed.
 
@@ -1082,7 +1104,7 @@ This is why SwitchX does not need anti-dilution rebases (which every other ve(3,
 | **Early Exit** | Not possible (must wait for expiry) | Penalty-based with 3 curve options (10-100%) |
 | **Early Exit Burns** | N/A | **50% of penalty permanently burned** (true supply reduction), 50% to voters |
 | **Fee Processing** | Direct passthrough to voters (no native token demand) | **50% automatic SWITCH buyback** + 50% passthrough — every swap generates native token demand |
-| **Fee Distribution** | Immediate 100% per period | Drip-based (10%/period from pool) — smooths volatility |
+| **Fee Distribution** | Immediate 100% per period | Drip-based (20%/period launch default from pool) — smooths volatility |
 | **Farm Rewards** | 100% liquid (immediate sell pressure) | 50-90% auto-locked for 2 years (three tiers: native 50%, non-native 75%, vampire 90%) |
 | **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed to voters |
 | **MEV Protection** | None; users vulnerable to sandwich attacks | Backrun fee surcharge makes sandwiches unprofitable |
@@ -1312,7 +1334,7 @@ The result is a deflationary token with increasing scarcity over time — the op
 | minEarlyExitFeeBps | 1,000 (10%) | `VotingEscrow.sol:105` |
 | feeDecayType | INVERSE_QUADRATIC | `VotingEscrow.sol:106` |
 | feeSplitBps | 5,000 (50/50) | `VotingEscrow.sol:107` |
-| DEFAULT_DRIP_RATE | 1,000 (10%) | `scripts/deployAll.js:53` |
+| DEFAULT_DRIP_RATE | 2,000 (20%) | `scripts/deployAll.js:53` |
 | buybackBps | 5,000 (50%) | `src/voting/scripts/deploy.js:240` |
 | TREASURY_RATE | 1000 (10%) | `scripts/deployAll.js:37` |
 | DEFAULT_COMMUNITY_FEE | 750 (75%) | `scripts/deployAll.js:44` |
@@ -1321,14 +1343,14 @@ The result is a deflationary token with increasing scarcity over time — the op
 | Base Rate Formula | `(budget×8)/(13×YEAR)` | `Minter.sol:198` |
 | Backrun Fee Factor | 5,000 (6x total) | `BackrunFeePlugin.sol:15` |
 | Max Backrun Factor | 10,000 (11x total) | `BackrunFeePlugin.sol:13` |
+| Max Backrun Public Fee | 18,000 (1.8%) | `BackrunFeePlugin.sol:14` |
 | LVR Capture Rate | 5,000 (50%) | `CrossDexOracleFeePlugin.sol:53` |
-| LVR Surcharge Cap | 10,000 (1%) | `CrossDexOracleFeePlugin.sol:54` |
+| LVR Surcharge Cap | 5,000 (0.5%) | `CrossDexOracleFeePlugin.sol:54` |
 | LVR Min Deviation | 20 (0.2%) | `CrossDexOracleFeePlugin.sol:55` |
 | ALM Fast TWAP | 15 minutes | `scripts/deployAll.js:70` |
 | ALM Slow TWAP | 2 hours | `scripts/deployAll.js:71` |
 | Min Rebalance Interval | 600 seconds | `scripts/deployAll.js:73` |
 | Drip Catchup Limit | 52 periods | `DripVotingReward.sol:34` |
-
 ### Audits
 
 The protocol has been audited at multiple layers. All reports are available in the [`audits/`](audits/) directory.
