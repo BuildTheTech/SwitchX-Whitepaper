@@ -156,11 +156,17 @@ Total swap fee = **Base Fee** + **Override Fee** + **Plugin Fee**
 
 The DynamicFeePlugin calculates the override fee based on recent price volatility, ensuring fees adapt to market conditions in real time. During calm markets, fees decrease to attract volume; during volatile periods, fees increase to compensate liquidity providers for impermanent loss.
 
-### 4.3 Community Fee
+### 4.3 Community Fee (Two-Tier)
 
-A configurable portion of all swap fees is diverted to the ve(3,3) system through the community fee mechanism. At launch, this is set to **75%** (`communityFee = 750`), meaning 75% of every swap fee collected enters the community-fee pathway. Of that community-fee flow, the launch-default voter-side v4 fee sends **7%** to treasury and **93%** to veNFT voter rewards for the pool’s gauge. The remaining 25% of the original swap fee accrues directly to liquidity providers (including ALM vault depositors).
+SwitchX employs a **two-tier community fee** that adapts based on whether a pool has voting rewards enabled:
 
-This split maximizes voter revenue — strengthening the ve(3,3) flywheel — while still leaving meaningful fee income for ALM vault depositors alongside their farming emissions. Industry benchmarks (Aerodrome, Velodrome) route 100% to voters; SwitchX's 75% ensures ALM vault depositors retain a direct fee incentive even after emissions end.
+**Non-voting pools (factory default = 5%):** Newly created pools that do not yet have a gauge start with a low `communityFee = 50` (5%). This keeps 95% of swap fees flowing directly to LPs, maximizing yield for pools that are not yet part of the ve(3,3) system. Under the current vault wiring, that 5% community cut accrues in the pool’s `V4CommunityVault` until a receiver/withdraw path is configured or the pool is later promoted to a voting gauge.
+
+**Voting-enabled pools (voter default = 75%):** When a gauge is created for a pool via `Voter.createV4Gauge()`, the Voter contract automatically upgrades the pool’s community fee to 750 (75%). Of that community-fee flow, the launch-default voter-side v4 fee sends **7%** to treasury and **93%** to veNFT voter rewards for the pool’s gauge. The remaining 25% of the original swap fee accrues directly to liquidity providers (including ALM vault depositors).
+
+This two-tier approach avoids extracting excess fees from pools that have no active voter reward distribution — fees that would otherwise sit idle in community vaults serving no economic purpose. Pools earn the higher fee tier only when they are actively generating voter rewards, ensuring the ve(3,3) flywheel is funded without penalizing nascent or community pools.
+
+Industry benchmarks (Aerodrome, Velodrome) route 100% to voters; SwitchX’s 75% on voting pools ensures ALM vault depositors retain a direct fee incentive even after emissions end. The 5% floor on non-voting pools minimizes deadweight fee drag on permissionless pools while still preserving an upgrade path into ve routing.
 
 This creates the core ve(3,3) feedback loop: voters direct emissions to pools → pools generate fees → fees flow to voters → voters are incentivized to direct emissions to the highest-yielding pools.
 
@@ -218,9 +224,9 @@ SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWIT
 
 The USDC/DAI stablecoin pair uses the same adaptive curve as USDC/WPLS (0.20% base, 1.0% max). Under normal conditions, stablecoins exhibit minimal volatility, so the fee stays near 0.20%. During depeg events (e.g., USDC dropping to $0.87 as in March 2023), the fee rises toward 1.0% to compensate LPs for impermanent loss. This full-range protection is appropriate because USDC/DAI is positioned as a vampire pool (1% deposit + 1% withdraw vault fees, 90% auto-lock) where competitiveness is secondary to LP protection and voter revenue capture.
 
-Day-one reserved activations inherit the same live-market fee logic. The activated set is `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/WPLS`, and `WBTC/DAI`; each ships with public dual-vault ALM, dedicated rebalance managers, deterministic bootstrap activation, and a 0.20% adaptive base fee. Those vaults now launch fail-closed on deposits: bootstrap deposits create positions, but public deposit caps remain at zero until a manual unlock verifies plugin wiring, manager liveness, oracle maturity, and current/fast/slow local prices within a bounded PulseX parity tolerance. When unlocked, the vaults reopen with finite side-specific caps rather than unlimited intake. `SWITCH/DAI` remains at 0.30% as a monopoly SWITCH pair. All other reserved pools remain parked on the factory default 0.10% floor until they are intentionally activated with seeded liquidity and pair-specific routing assumptions.
+Day-one reserved activations inherit the same live-market fee logic. The activated set is `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `INC/PLSX`, `WETH/WPLS`, and `USDC/PRVX`; each ships with public dual-vault ALM, dedicated rebalance managers, deterministic bootstrap activation, and a 0.20% adaptive base fee. Those vaults now launch fail-closed on deposits: bootstrap deposits create positions, but public deposit caps remain at zero until a manual unlock verifies plugin wiring, manager liveness, oracle maturity, and current/fast/slow local prices within a bounded PulseX parity tolerance. When unlocked, the vaults reopen with finite side-specific caps rather than unlimited intake. `WBTC/WPLS` and `WBTC/DAI` remain reserved price-only markets for phase 2 rather than day-one ALM activations. `SWITCH/DAI` remains at 0.30% as a monopoly SWITCH pair. All other reserved pools remain parked on the factory default 0.10% floor until they are intentionally activated with seeded liquidity and pair-specific routing assumptions.
 
-The launch-day high-volume PulseX-parity subset is `USDC/WPLS`, `USDC/DAI`, `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/WPLS`, and `WBTC/DAI`. Those pools run the full parity stack: `CrossDexOracleFee`, PulseX backrun executor allowlisting, and default arbitrage-keeper coverage. This means every activated reserved pool now ships with the same live-market posture instead of splitting activation into parity vs. non-parity subclasses.
+The launch-day high-volume PulseX-parity subset is `USDC/WPLS`, `USDC/DAI`, `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `INC/PLSX`, `WETH/WPLS`, and `USDC/PRVX`. Those pools run the full parity stack: `CrossDexOracleFee`, PulseX backrun executor allowlisting, and default arbitrage-keeper coverage. This means every day-one reserved activation now ships with the same live-market posture, while the deferred BTC pools stay outside the launch-critical parity surface until intentionally promoted later.
 
 ### 5.2 MEV Protection (Bot-Proof Backrun Fee)
 
@@ -396,7 +402,7 @@ This produces a base rate of approximately 18.93 SWITCH per second (≈1,635,000
 
 The exact allocation mix is determined by protocol governance and can shift over time as priorities evolve. During early launch, a larger share may be directed toward governance power (burn locks) to prevent hostile takeover; as the protocol matures and decentralizes, the balance may shift toward growth and operational needs. The `TREASURY_RATE` itself can be scaled down over time (capped at 10% max on-chain). The remaining 90% flows to the Voter contract for distribution to gauges based on veNFT votes.
 
-All initial liquidity outputs — ALM vault shares, LP position NFTs, veNFT locks, and bootstrap mints — can be routed to a configurable recipient address (`INITIAL_LIQUIDITY_TREASURY`) distinct from the ongoing-fee treasury, with per-source overrides available for granular control.
+Initial-liquidity share outputs — seeded ALM vault shares, veNFT locks, and bootstrap mints — can be routed to configurable seed-funder recipient addresses (`INITIAL_LIQUIDITY_TREASURY` plus optional secondary/tertiary/quaternary recipients) distinct from the ongoing-fee treasury. Two-funder launches default to `6667 / 3333` when no explicit split is provided. For three or more funders, operators must configure either every `INITIAL_LIQUIDITY_*_SHARE_BPS` value or every `INITIAL_LIQUIDITY_*_CONTRIBUTION_USD` value so the split is deterministic and independently recomputable; the current four-funder posture is `15000 / 10000 / 10000 / 10000`, which derives to `3334 / 2222 / 2222 / 2222`. Manual LP positions now mint directly to the configured recipient wallets for the funded-value tranche. Quote-funded manual LP positions (core init LPs and reserved backstops) follow the configured seed-funder split, while manual SWITCH LP positions preserve a treasury residual equal to the protocol-matched SWITCH tranche instead of giving seed funders the full matched position. The initial veNFT lock remains separate and follows `VE_INITIAL_LOCK_RECEIVER || deployer/signer`.
 
 ### 6.6 Why Fixed Supply Matters
 
@@ -545,11 +551,13 @@ To keep vote casting, recasting (`poke`), and vote clearing (`reset`) executable
 
 ### 8.2 Community Fee Collection
 
-When a swap occurs in any pool:
+When a swap occurs in a **voting-enabled pool** (one with a gauge):
 1. The community fee percentage (75%) of the swap fee is collected by `V4CommunityVault`; from that community-fee balance, 7% is diverted to the treasury via the voter-side v4 fee and the remaining 93% continues into voter rewards
 2. The Voter contract claims these fees during the `distribute()` call
 3. Fees are routed through the `ProtocolFeeManager` for processing
 4. Processed fees are deposited into the pool's `DripVotingReward` contract
+
+For **non-voting pools** (no gauge), only 5% of swap fees enter the community vault. These accrue at the vault level and are not an immediate treasury flow under the current launch wiring; once a gauge is created, the Voter upgrades the pool's community fee to 75% and begins distributing rewards.
 
 ### 8.3 Automatic Fee Buybacks (Key Differentiator)
 
@@ -608,7 +616,7 @@ SwitchX replaces this with the `DripVotingReward` contract, which pools fees and
 - **Bribe compatibility**: Direct bribes (`incentivize()`) bypass the drip mechanism and target the next period directly, preserving standard ve(3,3) bribe semantics
 - **Treasury/operator pool top-ups**: A role-gated top-up path (`TOP_UP_ROLE`) can add tokens directly to `poolBalance` for future drip release, enabling treasury fee recycling and delegated launch-ops execution without changing contract ownership
 - **Strategic implication**: This is intentionally different from a traditional immediate-payout `VotingReward`. Lower drip rates reward sustained voting on productive gauges because large fee backlogs are realized over many active epochs rather than all at once. SwitchX launches at a 20% weekly drip so rewards are still smoothed, but a single fee batch is roughly 60% distributed after ~4 active drip epochs, ~80% after ~8, and ~90% after ~11
-- **Governance flexibility**: Governance can raise `dripRate` later if faster payout is desired, but operators should checkpoint active drip tokens first so a new rate does not retroactively reprice missed periods
+- **Governance flexibility**: Governance can raise `dripRate` later if faster payout is desired, but the live contract now fails closed if any pooled reward token still has pending catch-up. Operators must first settle backlog in a voted period, typically by calling `triggerDrip(token)` until `pendingCatchupPeriods(token)` returns zero
 
 **Example:**
 
@@ -1109,12 +1117,12 @@ This is why SwitchX does not need anti-dilution rebases (which every other ve(3,
 | **MEV** | Extracted by external bots | Recaptured via afterSwap hook, redistributed to voters |
 | **MEV Protection** | None; users vulnerable to sandwich attacks | Backrun fee surcharge makes sandwiches unprofitable |
 | **LVR Protection** | None; arb bots extract LP value at standard fees | Cross-DEX oracle fee captures LVR from corrective arb swaps |
-| **Community Fee** | Varies (typically 100% to voters) | 75% to voters, 25% to LPs — balances flywheel strength with ALM vault returns |
+| **Community Fee** | Varies (typically 100% to voters) | Two-tier: 5% default (non-voting pools keep 95% for LPs), 75% on voting pools (feeds ve(3,3) flywheel, 25% to LPs) |
 | **Swap Fees** | Static fee tiers | Tiered volatility-adaptive fees (0.2%–0.3% base) + MEV surcharge + LVR surcharge |
 | **Liquidity Management** | Manual positions | Automated ALM vaults with TWAP rebalancing |
 | **Post-Emission Sustainability** | Depends on perpetual inflation continuing | Fee-funded buybacks, community farming top-ups, zero inflation |
 
-### 13.3 The SwitchX Flywheel
+### 13.3 The SwitchX Revenue Flow
 
 These mechanisms combine into a self-reinforcing economic flywheel:
 
@@ -1337,7 +1345,8 @@ The result is a deflationary token with increasing scarcity over time — the op
 | DEFAULT_DRIP_RATE | 2,000 (20%) | `scripts/deployAll.js:53` |
 | buybackBps | 5,000 (50%) | `src/voting/scripts/deploy.js:240` |
 | TREASURY_RATE | 1000 (10%) | `scripts/deployAll.js:37` |
-| DEFAULT_COMMUNITY_FEE | 750 (75%) | `scripts/deployAll.js:44` |
+| DEFAULT_COMMUNITY_FEE | 50 (5%) | `scripts/deployAll.js` — factory default for non-voting pools |
+| VOTER_DEFAULT_COMMUNITY_FEE | 750 (75%) | `scripts/deployAll.js` — applied when gauge is created |
 | VOTER_DEFAULT_V4_FEE | 70 (7.0%) | `scripts/deployAll.js:48` |
 | Emission Duration | 2.5 years | `Minter.sol:196` |
 | Base Rate Formula | `(budget×8)/(13×YEAR)` | `Minter.sol:198` |
