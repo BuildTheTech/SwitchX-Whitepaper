@@ -134,7 +134,7 @@ SwitchX is built on a modular architecture where each layer composes with the ne
 
 ### 4.1 V4Pool Mechanics
 
-At the core of SwitchX is the V4Pool contract — a concentrated liquidity AMM where liquidity providers allocate capital to specific price ranges (ticks). This is a ground-up recreation of Uniswap V4, itself derived from the Uniswap V3 concentrated liquidity design with significant modifications.
+At the core of SwitchX is the V4Pool contract — a concentrated liquidity AMM where liquidity providers allocate capital to specific price ranges (ticks). This is derived from the Uniswap V3 concentrated liquidity design with significant modifications.
 
 Each pool tracks:
 - A global price (`sqrtPriceX96`) and current tick
@@ -213,12 +213,12 @@ Each pool has its adaptive fee curve configured independently based on competiti
 
 | Pool | Base Fee | Max Fee | Strategy |
 |------|----------|---------|----------|
-| **USDC/WPLS** | 0.20% | 1.00% | Competitive — undercuts PulseX's fixed 0.26% at low volatility |
+| **USDC/WPLS** | 0.20% | 1.00% | Competitive — undercuts PulseX's fixed 0.29% at low volatility |
 | **SWITCH/USDC** | 0.30% | 1.00% | Monopoly — SwitchX is the only venue for SWITCH trading |
 | **SWITCH/WPLS** | 0.30% | 1.00% | Monopoly — same rationale as SWITCH/USDC |
 | **USDC/DAI** | 0.20% | 1.00% | Stablecoin — fee stays near 0.20% at low vol; full 1.0% max protects LPs during depeg |
 
-The USDC/WPLS base fee is set to capture more value per swap than the default while remaining competitive with PulseX (0.26% fixed). At low volatility, the adaptive fee sits near the 0.20% base — a meaningful undercut. During volatile periods, fees rise toward 1.0% to compensate LPs for impermanent loss.
+The USDC/WPLS base fee is set to capture more value per swap than the default while remaining competitive with PulseX (0.29% fixed). At low volatility, the adaptive fee sits near the 0.20% base — a meaningful undercut. During volatile periods, fees rise toward 1.0% to compensate LPs for impermanent loss.
 
 SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWITCH liquidity. Every SWITCH trade must route through SwitchX, so there is no competitive pressure to minimize fees. The 0.30% base captures more value for voters on every SWITCH trade while the 1.0% max provides IL protection during volatile markets.
 
