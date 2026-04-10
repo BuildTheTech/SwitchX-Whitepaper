@@ -98,7 +98,7 @@ SwitchX is built on a modular architecture where each layer composes with the ne
 ┌────────────────────────────┴────────────────────────────────────┐
 │                       PLUGIN LAYER                              │
 │  SwitchXBasePlugin: DynamicFee · BackrunFee · CrossDexOracleFee │
-│  FeeDiscount · SecurityPlugin · LimitOrderPlugin                │
+│  FeeDiscount                                                    │
 │  MevBackrunPlugin · VolatilityOraclePlugin · FarmingProxyPlugin │
 │  AlmPlugin                                                      │
 └────────────────────────────┬────────────────────────────────────┘
@@ -120,7 +120,7 @@ SwitchX is built on a modular architecture where each layer composes with the ne
 
 **Periphery** — User-facing contracts. NonfungiblePositionManager wraps liquidity positions as ERC721 tokens. SwapRouter provides stateless swap execution. Quoter enables off-chain swap simulation.
 
-**Plugin** — An extensible hook system attached to each pool. Plugins use a bitmap-driven configuration (uint8 `pluginConfig`) to selectively enable lifecycle hooks: `beforeInitialize`, `afterInitialize`, `beforeModifyPosition`, `afterModifyPosition`, `beforeSwap`, `afterSwap`, `beforeFlash`, `afterFlash`, and `handlePluginFee`. The `SwitchXBasePlugin` composes ten sub-plugins into a single contract that handles adaptive fees, MEV protection, cross-DEX LVR capture, oracle tracking, farming integration, ALM rebalancing, limit orders, security states, fee discounts, and MEV backrun execution. The plugin system is fully open to third-party developers — the published `@switchx/abstract-plugin` SDK provides base contracts, an upgradeable variant, and annotated example contracts for building and deploying custom plugins. See [`docs/plugin-developer-guide.md`](docs/plugin-developer-guide.md) for the complete developer reference.
+**Plugin** — An extensible hook system attached to pools when advanced management is needed. In the launch posture, `V4Factory.createPool()` inherits the default `SwitchXBasePlugin` through `V4Factory.defaultPluginFactory`, so new public pools get adaptive fees, oracle tracking, and same-block backrun protection at birth. Crucially, the old `SecurityPlugin` kill-switch path is not part of that default stack. Additional features that require explicit per-pool configuration — such as ALM rebalancing, CrossDex oracle pair wiring, farming incentives, fee discounts, MEV executor enablement, or later plugin replacement — remain role-gated follow-up actions. Plugins use a bitmap-driven configuration (uint8 `pluginConfig`) to selectively enable lifecycle hooks: `beforeInitialize`, `afterInitialize`, `beforeModifyPosition`, `afterModifyPosition`, `beforeSwap`, `afterSwap`, `beforeFlash`, `afterFlash`, and `handlePluginFee`. The `SwitchXBasePlugin` composes the managed launch stack into a single contract that handles adaptive fees, MEV protection, cross-DEX LVR capture, oracle tracking, farming integration, ALM rebalancing, fee discounts, and MEV backrun execution. The plugin system is fully open to third-party developers — the published `@switchx/abstract-plugin` SDK provides base contracts, an upgradeable variant, and annotated example contracts for building and deploying custom plugins. See [`docs/plugin-developer-guide.md`](docs/plugin-developer-guide.md) for the complete developer reference.
 
 **Farming** — Perpetual reward distribution. V4EternalFarming manages incentive programs with virtual tick-based reward accounting. FarmingCenter coordinates position enrollment and reward collection, including the auto-lock mechanism.
 
@@ -296,35 +296,39 @@ Without LVR protection, liquidity providers subsidize every arbitrage trade — 
 
 The `FeeDiscountPlugin` allows per-user fee reductions, enabling loyalty programs, partner integrations, or volume-based discounts. Discounts are applied after the base fee and backrun surcharge are calculated.
 
-### 5.5 Security Plugin
+### 5.5 Default Plugin and Explicit Managed Features
 
-The `SecurityPlugin` controls pool access through configurable security states:
+SwitchX launches with the default `SwitchXBasePlugin` attached to new public pools, but **without** the old `SecurityPlugin` pause / disable surface. That is the important trust boundary: every new pool keeps adaptive fees and oracle-driven pricing logic by default, while the protocol-admin kill switch is removed from the active launch stack.
 
-| State | Swaps | Adds | Burns | Flash |
-|-------|-------|------|-------|-------|
-| **Enabled** | Yes | Yes | Yes | Yes |
-| **Disabled** | No | No | No | No |
-| **BurnOnly** | No | No | Yes | No |
-| **FlashDisabled** | Yes | Yes | Yes | No |
+At birth, the launch-default active hook set is intentionally narrow:
 
-This allows pool operators to pause trading during emergencies, enable graceful wind-downs (burn-only mode), or disable flash loans while keeping swaps active.
+1. `AFTER_INIT`
+2. `BEFORE_SWAP`
+3. `AFTER_SWAP`
+4. `DYNAMIC_FEE`
 
-### 5.6 Limit Order Plugin
+This means new public pools inherit:
 
-The `LimitOrderPlugin` enables on-chain limit order execution through the `afterSwap` hook — no off-chain keepers or relayers required.
+1. Volatility oracle initialization
+2. Dynamic fee updates
+3. Same-block backrun fee protection
 
-**Mechanism:**
+More invasive managed features remain explicit per-pool actions. ALM rebalancing, CrossDex oracle pair wiring, farming incentives, MEV executor enablement, gauges, and any later plugin replacement or repair still require deliberate governance / operator setup after pool creation.
 
-1. **Placement**: Users deposit single-sided liquidity at a specific tick via `LimitOrderManager.place()`. Orders at the same tick and direction are grouped into a shared **epoch** for gas-efficient batch settlement.
-2. **Execution**: When a swap crosses the order's tick, the `afterSwap` hook detects the crossing, removes the epoch's liquidity, and marks it as filled. Execution is atomic with the triggering swap — no MEV opportunity exists between detection and fill.
-3. **Withdrawal**: After an epoch is filled, users withdraw their pro-rata share of the converted tokens via `withdraw()`.
+If an existing pool ever needs to be repaired or retrofitted onto the official plugin stack, the explicit path remains:
 
-**Properties:**
-- **No external dependencies**: Orders execute as part of normal swap flow, eliminating reliance on off-chain bots
-- **Gas efficient**: Epoch batching amortizes gas costs across all orders at the same price point
-- **Composable**: Works alongside dynamic fees, farming, and ALM without conflicts
+1. Deploy the plugin via `SwitchXBasePluginFactory.createPluginForExistingPool(...)`
+2. Attach it with `pool.setPlugin(pluginAddress)`
+3. Call `plugin.initialize()` to seed TWAP/oracle state and restore the full default hook config
+4. Only then configure any pool-specific managed features
 
-For launch, limit-order hooks are disabled on ALM launch pools to prioritize swap/rebalance gas safety under narrow tick spacing and volatile conditions; they can be re-enabled per pool after post-launch validation.
+Gauge onboarding keeps that same explicit ops boundary. Launch pools are expected to already inherit the official plugin at creation, and governance still verifies or repairs that state before enabling gauges, farming, MEV parity, or ALM management.
+
+### 5.6 Launch-Scope Managed Features
+
+The managed launch surface described in this paper is intentionally limited to the features that are part of the verified day-one posture: adaptive fees, MEV protection, cross-DEX LVR capture, oracle tracking, farming integration, ALM rebalancing, fee discounts, and MEV backrun execution.
+
+Additional hook-driven integrations remain outside the default launch posture until they have their own explicit operational runbooks, gas budgets, and production verification coverage.
 
 ---
 
@@ -577,7 +581,8 @@ In every existing ve(3,3) implementation — Solidly, Velodrome, Aerodrome, Then
 2. The buyback percentage (`buybackBps = 5000`, i.e., 50%) determines how much to swap
 3. The manager executes a swap through the SwitchX router using per-token swap paths:
    - Direct paths for tokens with liquid SWITCH pools (e.g., `USDC → SWITCH`, `WPLS → SWITCH`)
-   - Multi-hop paths for tokens without direct SWITCH pools (e.g., `DAI → USDC → SWITCH`)
+   - Multi-hop paths for tokens without direct SWITCH pools (e.g., `DAI → USDC → SWITCH`, `USDT → WPLS → SWITCH`, `WBTC → DAI → USDC → SWITCH`)
+   - Launch deployment preconfigures the core routing tokens plus the activated day-one reserved token set (`USDT`, `HEX`, `PLSX`, `INC`, `WETH`, `WBTC`, `PRVX`) so later reserved gauge onboarding inherits buyback routing without an additional fee-manager migration
 4. The resulting SWITCH tokens are sent to voters alongside any passthrough (unconverted) fee tokens
 5. The remaining 50% passes through as the original fee token
 
@@ -808,7 +813,7 @@ function _isMevInternalSwap(address sender, bytes calldata) internal view return
 Internal swaps receive special treatment:
 - **Zero swap fee**: The executor pays no fees on its routing leg through SwitchX (`outFee = 1` sentinel in `beforeSwap`)
 - **No backrun or LVR surcharge**: Both the backrun fee plugin and the cross-DEX oracle fee plugin are bypassed for internal swaps
-- **Full hook execution**: Farming virtual pool ticks and limit order state are still updated to maintain consistency
+- **Full hook execution**: Farming virtual pool ticks and other enabled managed accounting still update to maintain consistency
 
 **Complementary relationship with LVR protection:**
 
@@ -839,7 +844,6 @@ Operational defaults:
 - Mixed repayment routes are enabled for USDC/WPLS directions through DAI + StableSwap (`WPLS -> DAI -> USDC` and reverse).
 - V4 flash borrow path is guarded by a global kill-switch (`v4FlashBorrowEnabled`) and is enabled by default at launch.
 - The off-chain arbitrage keeper uses bounded per-arb sizing only for modeled V4-flash opportunities at launch: it finds the first profitable borrow, then only upsizes within a discrepancy-scaled band instead of always pushing to the maximum profitable notional. PulseX-pair and self-funded opportunities keep full max-profit sizing. This targets the observed V4 overshoot mode while still allowing repeated same-cycle corrective arbs.
-- `SecurityRegistry` flash status must be `ENABLED` for V4 flash borrowing.
 - **Self-funded mode** (`selfFundedEnabled`): When the executor contract holds token balances, it uses them directly instead of borrowing — eliminating the 0.01–0.29% borrow fee per arb. After the MEV swap, a buyback restores the spent tokens from the output. Failed arbs revert atomically (no loss of capital). Ships dark (disabled by default); activation sequence: fund executor → `setSelfFundedEnabled(true)` → monitor. Instant rollback: `setSelfFundedEnabled(false)` falls back to flash borrows.
 
 ---
@@ -1002,12 +1006,11 @@ All token transfers in the core protocol use the callback pattern (Section 4.4),
 - Flash loan attacks cannot manipulate state between credit and debit
 - Reentrancy is prevented through state validation
 
-### 12.2 Plugin Security States
+### 12.2 Plugin Attachment Model
 
-The SecurityPlugin (Section 5.5) provides granular control over pool operations, allowing administrators to:
-- Halt all trading during emergencies
-- Enable burn-only mode for graceful wind-downs
-- Disable flash loans while keeping swaps active
+SwitchX launches with `V4Factory.defaultPluginFactory` pointing to `SwitchXBasePluginFactory`, so permissionless public pools inherit the security-plugin-free default plugin automatically. The active birth-time hook set is limited to adaptive-fee / oracle / after-swap logic, while more invasive managed features still require explicit per-pool configuration.
+
+This launch posture removes protocol-level pause/disable controls from the default public-pool path while preserving role-gated plugin replacement, repair, and deeper managed configuration for curated pools.
 
 ### 12.3 Oracle Manipulation Guards
 
@@ -1025,7 +1028,7 @@ Role-based access control is enforced throughout the protocol:
 | Role | Scope | Controls |
 |------|-------|----------|
 | Factory Owner | Global | Pool deployment, role grants |
-| Plugin Authority | Per-pool | Fee configuration, security states |
+| Plugin Authority | Per-pool | Plugin attachment/configuration, fee configuration, managed-pool parameters |
 | `INCENTIVE_MAKER_ROLE` | Farming | Creating/deactivating incentives |
 | `FARMINGS_ADMINISTRATOR_ROLE` | Farming | Emergency withdraw, auto-lock config |
 | `AUTO_LOCK_EXEMPT_ROLE` | Farming | Exemption from auto-lock |
@@ -1322,7 +1325,6 @@ The result is a deflationary token with increasing scarcity over time — the op
 | BackrunFeePlugin | `src/plugin/contracts/plugins/BackrunFeePlugin.sol` |
 | CrossDexOracleFeePlugin | `src/plugin/contracts/plugins/CrossDexOracleFeePlugin.sol` |
 | MevBackrunPlugin | `src/plugin/contracts/plugins/MevBackrunPlugin.sol` |
-| SecurityPlugin | `src/plugin/contracts/plugins/SecurityPlugin.sol` |
 | VotingEscrow | `src/voting/contracts/VotingEscrow.sol` |
 | Minter | `src/voting/contracts/Minter.sol` |
 | ProtocolFeeManager | `src/voting/contracts/ProtocolFeeManager.sol` |
