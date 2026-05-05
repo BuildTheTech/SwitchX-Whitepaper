@@ -97,7 +97,7 @@ SwitchX is built on a modular architecture where each layer composes with the ne
                              │
 ┌────────────────────────────┴────────────────────────────────────┐
 │                       PLUGIN LAYER                              │
-│  SwitchXBasePlugin: DynamicFee · BackrunFee · CrossDexOracleFee │
+│  SwitchXBasePlugin: DynamicFee · BackrunFee · ToxicityFeeV2 │
 │  FeeDiscount                                                    │
 │  MevBackrunPlugin · VolatilityOraclePlugin · FarmingProxyPlugin │
 │  AlmPlugin                                                      │
@@ -120,7 +120,7 @@ SwitchX is built on a modular architecture where each layer composes with the ne
 
 **Periphery** — User-facing contracts. NonfungiblePositionManager wraps liquidity positions as ERC721 tokens. SwapRouter provides stateless swap execution. Quoter enables off-chain swap simulation.
 
-**Plugin** — An extensible hook system attached to pools when advanced management is needed. In the launch posture, `V4Factory.createPool()` inherits the default `SwitchXBasePlugin` through `V4Factory.defaultPluginFactory`, so new public pools get adaptive fees, oracle tracking, and same-block backrun protection at birth. Crucially, the old `SecurityPlugin` kill-switch path is not part of that default stack. Additional features that require explicit per-pool configuration — such as ALM rebalancing, CrossDex oracle pair wiring, farming incentives, fee discounts, MEV executor enablement, or later plugin replacement — remain role-gated follow-up actions. Plugins use a bitmap-driven configuration (uint8 `pluginConfig`) to selectively enable lifecycle hooks: `beforeInitialize`, `afterInitialize`, `beforeModifyPosition`, `afterModifyPosition`, `beforeSwap`, `afterSwap`, `beforeFlash`, `afterFlash`, and `handlePluginFee`. The `SwitchXBasePlugin` composes the managed launch stack into a single contract that handles adaptive fees, MEV protection, cross-DEX LVR capture, oracle tracking, farming integration, ALM rebalancing, fee discounts, and MEV backrun execution. The plugin system is fully open to third-party developers — the published `@switchx/abstract-plugin` SDK provides base contracts, an upgradeable variant, and annotated example contracts for building and deploying custom plugins. See [`docs/plugin-developer-guide.md`](docs/plugin-developer-guide.md) for the complete developer reference.
+**Plugin** — An extensible hook system attached to pools when advanced management is needed. In the launch posture, `V4Factory.createPool()` inherits the default `SwitchXBasePlugin` through `V4Factory.defaultPluginFactory`, so new public pools get adaptive fees, oracle tracking, and same-block backrun protection at birth. Crucially, the old `SecurityPlugin` kill-switch path is not part of that default stack. Additional features that require explicit per-pool configuration — such as ALM rebalancing, Toxicity Fee V2 source wiring on high-volume parity pools, farming incentives, MEV executor enablement, or later plugin replacement — remain role-gated follow-up actions. Plugins use a bitmap-driven configuration (uint8 `pluginConfig`) to selectively enable lifecycle hooks: `beforeInitialize`, `afterInitialize`, `beforeModifyPosition`, `afterModifyPosition`, `beforeSwap`, `afterSwap`, `beforeFlash`, `afterFlash`, and `handlePluginFee`. The `SwitchXBasePlugin` composes the managed launch stack into a single contract that handles adaptive fees, MEV protection, directional cross-DEX toxicity pricing, optional signed fee quotes, a disabled-by-default priority-fee Fee Auction layer, oracle tracking, farming integration, ALM rebalancing, and MEV backrun execution. Managed launch pools keep `feeDiscountRegistry` unset by default; internal MEV fee exemption comes from the sender-trust path (`mevExecutor` / `trustedInternalExecutors`), not from frontend discounts. The managed launch composition intentionally omits `LimitOrderPlugin`; standalone limit-order contracts remain available for a future separately reviewed composition. The plugin system is fully open to third-party developers — the published `@switchx/abstract-plugin` SDK provides base contracts, an upgradeable variant, and annotated example contracts for building and deploying custom plugins. See [`docs/plugin-developer-guide.md`](docs/plugin-developer-guide.md) for the complete developer reference.
 
 **Farming** — Perpetual reward distribution. V4EternalFarming manages incentive programs with virtual tick-based reward accounting. FarmingCenter coordinates position enrollment and reward collection, including the auto-lock mechanism.
 
@@ -153,6 +153,8 @@ Total swap fee = **Base Fee** + **Override Fee** + **Plugin Fee**
 | **Base Fee** | Static fee set per pool (configurable, 100–10,000 bps) | Pool owner / factory |
 | **Override Fee** | Dynamic fee calculated by the plugin's `beforeSwap` hook | DynamicFeePlugin |
 | **Plugin Fee** | Additional revenue accumulated by the plugin contract | handlePluginFee callback |
+
+Override-fee revenue remains the default path for ordinary LP/voter-aligned economics: it enters the pool's standard fee accounting, then splits through LP fee growth and the configured community-fee path. Plugin-fee revenue is intentionally separate: the pool transfers it to the plugin, and authorized plugin managers withdraw it through `collectPluginFee(token, amount, recipient)`. SwitchX uses plugin fees only for ring-fenced MEV-pressure revenue streams: same-block Backrun Fee at launch, and Fee Auction only if separately enabled after telemetry and fork proof. Ordinary adaptive fees and Toxicity Fee V2 stay on the override-fee path.
 
 The DynamicFeePlugin calculates the override fee based on recent price volatility, ensuring fees adapt to market conditions in real time. During calm markets, fees decrease to attract volume; during volatile periods, fees increase to compensate liquidity providers for impermanent loss.
 
@@ -224,9 +226,9 @@ SWITCH token pairs use higher base fees because SwitchX holds a monopoly on SWIT
 
 The USDC/DAI stablecoin pair uses the same adaptive curve as USDC/WPLS (0.20% base, 1.0% max). Under normal conditions, stablecoins exhibit minimal volatility, so the fee stays near 0.20%. During depeg events (e.g., USDC dropping to $0.87 as in March 2023), the fee rises toward 1.0% to compensate LPs for impermanent loss. This full-range protection is appropriate because USDC/DAI is positioned as a vampire pool (1% deposit + 1% withdraw vault fees, 90% auto-lock) where competitiveness is secondary to LP protection and voter revenue capture.
 
-Day-one reserved activations inherit the same live-market fee logic. The activated set is `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `INC/PLSX`, `WETH/WPLS`, and `USDC/PRVX`; each ships with public dual-vault ALM, dedicated rebalance managers, deterministic bootstrap activation, and a 0.20% adaptive base fee. Those vaults now launch fail-closed on deposits: bootstrap deposits create positions, but public deposit caps remain at zero until a manual unlock verifies plugin wiring, manager liveness, oracle maturity, and current/fast/slow local prices within a bounded PulseX parity tolerance. When unlocked, the vaults reopen with finite side-specific caps rather than unlimited intake. `WBTC/WPLS` and `WBTC/DAI` remain reserved price-only markets for phase 2 rather than day-one ALM activations. `SWITCH/DAI` remains at 0.30% as a monopoly SWITCH pair. All other reserved pools remain parked on the factory default 0.10% floor until they are intentionally activated with seeded liquidity and pair-specific routing assumptions.
+Day-one reserved activations inherit the same live-market fee logic. The activated set is `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/DAI`, and `USDC/PRVX`; each ships with public dual-vault ALM, dedicated rebalance managers, deterministic bootstrap activation, and a 0.20% adaptive base fee. Those vaults now launch fail-closed on deposits: bootstrap deposits create positions, but public deposit caps remain at zero until a manual unlock verifies plugin wiring, manager liveness, oracle maturity, and current/fast/slow local prices within a bounded PulseX parity tolerance. When unlocked, the vaults reopen with finite side-specific caps rather than unlimited intake. `INC/PLSX` and `WBTC/WPLS` remain reserved price-only markets for phase 2 rather than day-one ALM activations. `SWITCH/DAI` remains at 0.30% as a monopoly SWITCH pair. All other reserved pools remain parked on the factory default 0.10% floor until they are intentionally activated with seeded liquidity and pair-specific routing assumptions.
 
-The launch-day high-volume PulseX-parity subset is `USDC/WPLS`, `USDC/DAI`, `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `INC/PLSX`, `WETH/WPLS`, and `USDC/PRVX`. Those pools run the full parity stack: `CrossDexOracleFee`, PulseX backrun executor allowlisting, and default arbitrage-keeper coverage. This means every day-one reserved activation now ships with the same live-market posture, while the deferred BTC pools stay outside the launch-critical parity surface until intentionally promoted later.
+The launch-day high-volume PulseX-parity subset is `USDC/WPLS`, `USDC/DAI`, `WPLS/DAI`, `USDT/WPLS`, `WPLS/HEX`, `WPLS/PLSX`, `INC/WPLS`, `WETH/WPLS`, `WBTC/DAI`, and `USDC/PRVX`. All of those pools run PulseX backrun executor allowlisting, arbitrage-keeper coverage, and **Toxicity Fee V2**. `USDC/WPLS` uses two direct PulseX reference sources with the deepest source first, `USDC/DAI` uses the stable quote source plus one direct source, and the reserved parity pools use the deepest live direct PulseX source for their token pair. If multiple live references diverge beyond `maxSourceSpreadBps`, Toxicity V2 keeps pricing active through a canonical-source or median fallback rather than disabling the surcharge. Reserved pools stay deepest-only to avoid noisy secondary references on lower-liquidity launch markets.
 
 ### 5.2 MEV Protection (Bot-Proof Backrun Fee)
 
@@ -235,68 +237,107 @@ A **sandwich attack** is the most common form of MEV extraction on DEXs: an atta
 The `BackrunFeePlugin` eliminates this attack vector by making the back-run leg — the profitable reversal — prohibitively expensive:
 
 - **Trigger condition**: A swap occurs in the same block as a previous swap, and the new swap's direction would profit from the prior price movement (i.e., it reverses the direction of the previous swap's tick change).
-- **Surcharge formula**: `updatedFee = baseFee + (baseFee × backrunFeeFactor / 1000)`
-- **Default factor**: `5000` (i.e., +500%, resulting in 6x the base fee)
-- **Maximum factor**: `10000` (10x surcharge, 11x total)
-- **Public fee ceiling**: same-block backrun pricing is clipped at `18,000` hundredths of a bip (1.8%) to avoid pathological multi-percent public fills during extreme volatility
+- **Surcharge formula**: `pluginFee = min(additiveFee, max(0, totalFeeCap - currentPublicFee))`
+- **Default additive fee**: `50,000` hundredths of a bip (5.0%)
+- **Total same-block fee cap**: `100,000` hundredths of a bip (10.0%)
+- **Accounting path**: the same-block surcharge is emitted as plugin fee after adaptive/Toxicity public pricing is known, so the additive leg cannot exceed the configured total fee cap
+- **Revenue treatment**: this fee is ring-fenced plugin revenue, not ordinary LP/community fee growth. It must be collected and routed under an explicit operator/governance policy.
 
 **Why regular users are unaffected**: The surcharge only triggers on same-block direction reversals — a pattern that characterizes sandwich back-runs, not ordinary trading. Users swapping in different blocks, or in the same direction as the prior price movement, always pay the standard fee. In practice, this means normal traders never see the surcharge while sandwich bots face fees that exceed their expected profit, making the attack unprofitable.
 
-### 5.3 Cross-DEX LVR Protection (Oracle Fee)
+### 5.3 Toxicity Fee V2 (Directional Cross-DEX LVR Protection)
 
-The BackrunFeePlugin (Section 5.2) protects against sandwich attacks that originate within SwitchX — but a significant class of MEV occurs across DEXs. When a user swaps on PulseX, the resulting price movement creates an arbitrage opportunity against SwitchX. External bots exploit this by trading on SwitchX at the normal fee to correct the price discrepancy. This is known as **Loss-Versus-Rebalancing (LVR)** — the value that liquidity providers lose to informed arbitrageurs correcting stale prices.
+The `BackrunFeePlugin` (Section 5.2) protects against sandwich attacks that originate within SwitchX — but a significant class of MEV occurs across DEXs. When external venues move first, informed corrective flow trades against stale SwitchX quotes. That is still **Loss-Versus-Rebalancing (LVR)**, but launch no longer uses the old single-pair raw-deviation surcharge as the primary public-fee model on managed core pools.
 
-The `CrossDexOracleFeePlugin` addresses this by reading PulseX pair reserves on every swap and applying a proportional surcharge to corrective (arbitrage-direction) trades:
+Instead, day-one high-volume parity pools use **Toxicity Fee V2**:
 
-**How it works:**
+1. Build a bounded external reference from configured sources.
+   - `USDC/WPLS`: PulseX V1 + PulseX V2 direct pairs
+   - `USDC/DAI`: stable quote source + best direct PulseX pair
+2. Fail open if no source is usable or every configured source is stale; when live sources disagree too widely, use a conservative canonical/median fallback.
+3. Compare SwitchX price to that reference before the swap.
+4. Charge extra only when the incoming swap moves SwitchX **toward** the external reference.
+5. Scale the surcharge by **consumed gap**, not just starting deviation.
 
-1. The plugin reads the external PulseX pair's reserves to derive its current price
-2. It compares this against the SwitchX pool's `sqrtPriceX96`
-3. If the swap moves the SwitchX price **toward** the external price (corrective / arb direction), a surcharge is applied
-4. The surcharge is proportional to the price deviation, minus the existing dynamic + backrun fee (no double-charging)
-5. Safety guard: current-block reserve updates and stale oracle reserves (>5 minutes old) are never used as the external reference; if the live PulseX read is unusable, the surcharge is skipped rather than charged from cached state
+That makes the public lane directional and size-aware instead of simply taxing any large raw discrepancy.
 
-**Surcharge formula:**
+**Unsigned public surcharge formula:**
 
 ```
-targetFee = deviationBps × captureRate
-surcharge = max(0, targetFee − existingFee)
-totalFee  = existingFee + min(surcharge, cap)
+gap0 = deviation before the swap
+gap1 = estimated deviation after the swap (active-range-only estimate)
+consumedGap = max(0, gap0 - gap1)
+surcharge = peakSurcharge × clamp(consumedGap / maxConsumedGap, 0, 1)^2
+totalFee = baseFee + surcharge
 ```
 
-**Parameters:**
+If the swap would cross the active range boundary, the surcharge clips to the configured peak. If no configured reference can be read safely, the toxicity leg fails open and the user pays only the existing adaptive + same-block backrun fee stack. Direct PulseX references treat `reserveTimestampLast == block.timestamp` as fresh rather than stale; only future timestamps or sources older than the pool's tiered `maxSourceAge` fail open. When multiple live references are available but disagree beyond the spread guard, the engine uses the configured canonical source for two-source pools or the median for three-source pools so pricing remains active without averaging a known-wide reference set.
+
+**Launch parameters on high-volume parity managed pools:**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `stalenessFeeFactor` | 5,000 (50%) | Fraction of deviation targeted as total fee |
-| `stalenessFeeCapHBips` | 5,000 (0.5%) | Maximum surcharge cap |
-| `minDeviationBps` | 20 (0.2%) | Noise filter — deviations below this are ignored |
-| `maxOracleReserveAge` | 300s (5 min) | Maximum age for a live external reserve snapshot before the surcharge fails open |
+| `noFeeBandBps` | 20 (0.2%) | Ignore small deviations |
+| `maxConsumedGapBps` | 100 (1.0%) | Saturation point for the quadratic consumed-gap curve |
+| `peakSurchargeHBips` | 50,000 (5.0%) | Maximum added surcharge |
+| `maxSourceSpreadBps` | 1,000 (10%) | Spread guard that switches from blended pricing to canonical/median fallback |
+| `coreMaxSourceAge` | 900s (15 min) | Fail-open guard for core USDC/WPLS and USDC/DAI references |
+| `reservedMaxSourceAge` | 1800s (30 min) | Fail-open guard for lower-volume reserved parity references |
+| `maxSourceAgeCap` | 3600s (60 min) | Hard cap for per-pool/source-age overrides |
+
+This still feeds the ve(3,3) flywheel: better corrective-flow recapture means more swap-fee value available to the community-vault / voter path. The difference is that launch pricing on the managed core pools is now targeted at stale-quote consumption rather than at raw discrepancy alone.
+
+**Signed fee lane (explicit launch activation):**
+
+SwitchX also ships a native EIP-712 signed quote lane inside the same plugin. Trusted routers can attach a signed per-swap fee quote that binds to the pool, router, recipient, callback payer, direction, amount, price limit, fee, nonce, and deadline. This is not a blanket frontend discount. It is a precision tool for first-party routed flow: the frontend repo's Vercel Node function only quotes eligible single-hop swaps, enforces managed-pool and per-token raw amount caps, uses short deadlines, and can be paired with strict frontend mode so protected swaps wait for a valid signed quote instead of accidentally using the unsigned public lane. The frontend requires an explicit signed-fee enable flag in addition to the quote URL, so merely deploying the disabled Vercel endpoint does not break normal swaps. The intended production Vercel posture is to enable this lane for eligible first-party swaps once the signer SLA, key-rotation runbook, frontend configuration, WAF/BotID controls, on-chain allowlists, and fork proof are ready. Until that lane is enabled, unsigned Toxicity pricing applies to corrective public flow by swap shape, not by user identity.
 
 **Direction detection:**
 
 The plugin only surcharges swaps that correct the price discrepancy:
-- If SwitchX price is **higher** than PulseX → only `zeroToOne` swaps (pushing price down) are surcharged
-- If SwitchX price is **lower** than PulseX → only `oneToZero` swaps (pushing price up) are surcharged
+- If SwitchX price is **higher** than the reference set → only `zeroToOne` swaps (pushing price down) are surcharged
+- If SwitchX price is **lower** than the reference set → only `oneToZero` swaps (pushing price up) are surcharged
 - Swaps in the opposite (non-corrective) direction always pay the normal fee
 
 **Interaction with other fee components:**
 
-The `max(0, targetFee − existingFee)` formula ensures that the backrun fee (Section 5.2) and cross-DEX oracle fee never double-charge. If the backrun fee already exceeds the cross-DEX target, no additional surcharge is applied. The total fee is effectively `max(backrunFee, crossDexTargetFee)`.
-
-**PulseX pair auto-selection:**
-
-The `setPulseXPairFromFactories()` function queries both PulseX V1 and V2 factories, scores each pair by `reserve0 × reserve1` (liquidity depth), and selects the deepest-liquidity pair. Token ordering alignment is auto-detected. If neither factory has the pair, the feature gracefully degrades (no surcharge applied).
+- Internal MEV sender-trust always wins first. `mevExecutor` and `trustedInternalExecutors` still get sentinel `overrideFee=1`, independent of fee discounts or signed quotes.
+- A valid signed quote replaces the public toxicity calculation for that swap and also bypasses `feeDiscountRegistry`.
+- Unsigned public flow uses `baseFee + toxicitySurcharge`, then still runs the legacy fee-discount hook for backwards compatibility. Managed launch pools simply keep `feeDiscountRegistry` unset, so that final step is inert in the launch posture.
+- Fee Auction, when separately enabled after telemetry and fork proof, can add `pluginFee` only when unsigned public flow already has same-block backrun or Toxicity V2 pressure. Internal MEV and signed quotes always bypass it.
 
 **Why this matters for LPs:**
 
-Without LVR protection, liquidity providers subsidize every arbitrage trade — each time an external bot corrects a stale SwitchX price, the LP effectively sells at the old (worse) price. The cross-DEX oracle fee ensures that a portion of this correction value is captured as fee revenue for the pool, making LP positions more profitable and reducing the hidden cost of providing liquidity.
+Without LVR protection, liquidity providers subsidize every arbitrage trade — each time an external bot corrects a stale SwitchX price, the LP effectively sells at the old (worse) price. Toxicity Fee V2 ensures that a portion of this correction value is captured as fee revenue for the pool, making LP positions more profitable and reducing the hidden cost of providing liquidity.
 
-### 5.4 Fee Discount Plugin
+### 5.4 Fee Auction Layer (Deployed, Disabled by Default)
 
-The `FeeDiscountPlugin` allows per-user fee reductions, enabling loyalty programs, partner integrations, or volume-based discounts. Discounts are applied after the base fee and backrun surcharge are calculated.
+SwitchX also includes a disabled-by-default Fee Auction layer for future priority-fee gas-war arbitrage defense. The math lives in `ToxicityFeeEngine` as a stateless helper so the managed plugin avoids a second engine contract and constructor/deployer threading.
 
-### 5.5 Default Plugin and Explicit Managed Features
+When enabled, Fee Auction can add a `pluginFee` based on the transaction priority fee:
+
+```
+priorityFee = max(tx.gasprice - block.basefee, 0)
+auctionFee = min((priorityFee - floor) × feePerGwei / 1 gwei, maxFee)
+```
+
+It is deliberately pressure-gated. High priority fee alone is not enough; the swap must also have an upstream MEV-pressure signal from the same-block backrun fee or Toxicity V2. This avoids taxing urgent but non-corrective users during congestion while preserving an additional tax lever for observed next-block gas-war arbitrage.
+
+Launch posture:
+
+1. `feeAuctionConfig() == 0`
+2. Fee Auction disabled on every launch pool
+3. Internal MEV returns `overrideFee=1, pluginFee=0`
+4. Signed quote swaps return the quoted `overrideFee` and `pluginFee=0`
+5. Activation is a single admin setter per plugin (`setFeeAuctionConfig(...)`) applied through the same managed-pool configuration script used for Toxicity V2
+6. Activation requires priority-fee telemetry or a documented emergency arb-loss incident, calibrated capped parameters, an explicit plugin-fee disposition policy, fresh fork proof, and rollback proof
+
+Fee Auction uses `pluginFee` deliberately so priority-fee gas-war recapture can be accounted for separately from LP-compensation fees. Before activation, operators must decide and publish where collected plugin fees go, such as treasury/keeper subsidy, protocol buyback funding, or another governance-approved recipient. Until that policy and collection proof exist, the layer stays disabled.
+
+### 5.5 Fee Discount Plugin
+
+The `FeeDiscountPlugin` remains available for legacy or unmanaged integrations, but it is not part of the managed launch fee policy. Managed launch pools keep `feeDiscountRegistry` unset, internal MEV fee exemption comes from sender trust, and any future first-party precision pricing should use the signed quote lane in Section 5.3 rather than blanket address-based discounts.
+
+### 5.6 Default Plugin and Explicit Managed Features
 
 SwitchX launches with the default `SwitchXBasePlugin` attached to new public pools, but **without** the old `SecurityPlugin` pause / disable surface. That is the important trust boundary: every new pool keeps adaptive fees and oracle-driven pricing logic by default, while the protocol-admin kill switch is removed from the active launch stack.
 
@@ -313,7 +354,7 @@ This means new public pools inherit:
 2. Dynamic fee updates
 3. Same-block backrun fee protection
 
-More invasive managed features remain explicit per-pool actions. ALM rebalancing, CrossDex oracle pair wiring, farming incentives, MEV executor enablement, gauges, and any later plugin replacement or repair still require deliberate governance / operator setup after pool creation.
+More invasive managed features remain explicit per-pool actions. ALM rebalancing, Toxicity Fee V2 source wiring on the high-volume parity pools, farming incentives, MEV executor enablement, gauges, and any later plugin replacement or repair still require deliberate governance / operator setup after pool creation.
 
 If an existing pool ever needs to be repaired or retrofitted onto the official plugin stack, the explicit path remains:
 
@@ -324,9 +365,9 @@ If an existing pool ever needs to be repaired or retrofitted onto the official p
 
 Gauge onboarding keeps that same explicit ops boundary. Launch pools are expected to already inherit the official plugin at creation, and governance still verifies or repairs that state before enabling gauges, farming, MEV parity, or ALM management.
 
-### 5.6 Launch-Scope Managed Features
+### 5.7 Launch-Scope Managed Features
 
-The managed launch surface described in this paper is intentionally limited to the features that are part of the verified day-one posture: adaptive fees, MEV protection, cross-DEX LVR capture, oracle tracking, farming integration, ALM rebalancing, fee discounts, and MEV backrun execution.
+The managed launch surface described in this paper is intentionally limited to the features that are part of the verified day-one posture: adaptive fees, MEV protection, Toxicity Fee V2 on the high-volume parity pools, disabled-by-default Fee Auction infrastructure, oracle tracking, farming integration, ALM rebalancing, and MEV backrun execution. Fee discounts remain available in code for legacy/unmanaged cases, but managed launch pools keep `feeDiscountRegistry` unset. Managed limit-order hooks are not part of the launch composition; future managed limit-order support requires a new plugin-composition decision, bytecode-size proof, and review.
 
 Additional hook-driven integrations remain outside the default launch posture until they have their own explicit operational runbooks, gas budgets, and production verification coverage.
 
@@ -785,9 +826,10 @@ SwitchX implements an `afterSwap` hook-based MEV recapture system through the `M
 2. afterSwap hook fires
 3. If MEV is enabled and executor is configured:
    → Plugin calls executor.onAfterSwap(pool, recipient, zeroToOne, amount0, amount1)
-4. Executor evaluates arbitrage opportunity against PulseX
+4. Executor evaluates a bounded same-tx arbitrage ladder against PulseX
 5. If profitable, executor performs backrun trade:
-   → Selects cheapest borrow source: self-funded (0% fee) > V4 flash (0.01%) > PulseX pair (0.29%)
+   → Selects the safest profitable borrow source: self-funded (0% fee), then the direct PulseX pair when it fully supports the same direct-benchmark borrow at no worse resolved repayment cost than V4, with V4 flash (0.01%) retained as fallback depth
+   → Starts from the full user-output-sized candidate, then halves through a small bounded ladder if the larger attempt cannot clear repayment/profitability
    → Executes internal SwitchX swap (fee-exempt MEV path)
    → Repays borrow via configured exact-output route (V1/V2 or StableSwap)
    → Self-funded mode: buys back spent tokens from MEV output, restoring held balance
@@ -799,6 +841,7 @@ SwitchX implements an `afterSwap` hook-based MEV recapture system through the `M
 - Stablecoin routes (e.g., USDC/DAI) use PulseX StableSwap for tighter repayment pricing.
 - Mixed routes support volatile + stable hop composition (for example `WPLS -> DAI -> USDC`), where stable hops are pinned to StableSwap pools and volatile hops dynamically select the cheaper PulseX V1/V2 pair at execution time.
 - Same-pool V4 flash is intentionally unsupported; cross-pool flash sources are configured per token.
+- If all bounded same-tx candidates fail, the hook still fails open and later corrective flow falls back to the external-actor path described in Section 5.3, where the Cross-DEX oracle fee captures part of that residual value.
 
 ### 10.3 Internal Swap Detection
 
@@ -843,6 +886,7 @@ Operational defaults:
 - StableSwap repayment routes are enabled for USDC/DAI directions.
 - Mixed repayment routes are enabled for USDC/WPLS directions through DAI + StableSwap (`WPLS -> DAI -> USDC` and reverse).
 - V4 flash borrow path is guarded by a global kill-switch (`v4FlashBorrowEnabled`) and is enabled by default at launch.
+- For direct PulseX-benchmarked arbs, the executor compares the direct PulseX pair and V4 flash resolved repayment costs when both sources can fully support the same borrow. It prefers the direct PulseX pair only when that path is not more expensive, keeping V4 available for cheaper routed-repay executions and fallback depth.
 - The off-chain arbitrage keeper uses bounded per-arb sizing only for modeled V4-flash opportunities at launch: it finds the first profitable borrow, then only upsizes within a discrepancy-scaled band instead of always pushing to the maximum profitable notional. PulseX-pair and self-funded opportunities keep full max-profit sizing. This targets the observed V4 overshoot mode while still allowing repeated same-cycle corrective arbs.
 - **Self-funded mode** (`selfFundedEnabled`): When the executor contract holds token balances, it uses them directly instead of borrowing — eliminating the 0.01–0.29% borrow fee per arb. After the MEV swap, a buyback restores the spent tokens from the output. Failed arbs revert atomically (no loss of capital). Ships dark (disabled by default); activation sequence: fund executor → `setSelfFundedEnabled(true)` → monitor. Instant rollback: `setSelfFundedEnabled(false)` falls back to flash borrows.
 
@@ -1323,7 +1367,8 @@ The result is a deflationary token with increasing scarcity over time — the op
 | SwitchXBasePlugin | `src/plugin/contracts/SwitchXBasePlugin.sol` |
 | DynamicFeePlugin | `src/plugin/contracts/plugins/DynamicFeePlugin.sol` |
 | BackrunFeePlugin | `src/plugin/contracts/plugins/BackrunFeePlugin.sol` |
-| CrossDexOracleFeePlugin | `src/plugin/contracts/plugins/CrossDexOracleFeePlugin.sol` |
+| ToxicityFeePlugin | `src/plugin/contracts/plugins/ToxicityFeePlugin.sol` |
+| ToxicityFeeEngine | `src/plugin/contracts/plugins/ToxicityFeeEngine.sol` |
 | MevBackrunPlugin | `src/plugin/contracts/plugins/MevBackrunPlugin.sol` |
 | VotingEscrow | `src/voting/contracts/VotingEscrow.sol` |
 | Minter | `src/voting/contracts/Minter.sol` |
@@ -1352,12 +1397,12 @@ The result is a deflationary token with increasing scarcity over time — the op
 | VOTER_DEFAULT_V4_FEE | 70 (7.0%) | `scripts/deployAll.js:48` |
 | Emission Duration | 2.5 years | `Minter.sol:196` |
 | Base Rate Formula | `(budget×8)/(13×YEAR)` | `Minter.sol:198` |
-| Backrun Fee Factor | 5,000 (6x total) | `BackrunFeePlugin.sol:15` |
-| Max Backrun Factor | 10,000 (11x total) | `BackrunFeePlugin.sol:13` |
-| Max Backrun Public Fee | 18,000 (1.8%) | `BackrunFeePlugin.sol:14` |
-| LVR Capture Rate | 5,000 (50%) | `CrossDexOracleFeePlugin.sol:53` |
-| LVR Surcharge Cap | 5,000 (0.5%) | `CrossDexOracleFeePlugin.sol:54` |
-| LVR Min Deviation | 20 (0.2%) | `CrossDexOracleFeePlugin.sol:55` |
+| Backrun Additive Plugin Fee | 50,000 (5.0%) | `BackrunFeePlugin.sol` |
+| Max Backrun Total Fee | 100,000 (10.0%) | `BackrunFeePlugin.sol` |
+| Toxicity No-Fee Band | 20 (0.2%) | `scripts/deployAll.js` / `ToxicityFeePlugin.sol` |
+| Toxicity Max Consumed Gap | 100 (1.0%) | `scripts/deployAll.js` / `ToxicityFeePlugin.sol` |
+| Toxicity Peak Surcharge | 50,000 (5.0%) | `scripts/deployAll.js` / `ToxicityFeePlugin.sol` |
+| Toxicity Max Source Spread | 1,000 (10%) | `scripts/deployAll.js` / `ToxicityFeePlugin.sol` |
 | ALM Fast TWAP | 15 minutes | `scripts/deployAll.js:70` |
 | ALM Slow TWAP | 2 hours | `scripts/deployAll.js:71` |
 | Min Rebalance Interval | 600 seconds | `scripts/deployAll.js:73` |
